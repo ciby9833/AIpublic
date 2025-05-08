@@ -21,8 +21,22 @@ export const authApi = {
         `${API_BASE_URL}/api/auth/feishu/callback?code=${code}`
       );
       
+      // 添加响应状态日志
+      console.log('Auth callback response:', {
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText
+      });
+      
       const data = await response.json();
-      console.log('收到回调数据:', data);
+      
+      // 添加数据验证日志
+      console.log('Auth callback data:', {
+        hasStatus: !!data.status,
+        hasUserInfo: !!data.user_info,
+        hasAccessToken: !!data.access_token,
+        hasExpiresAt: !!data.expires_at
+      });
       
       if (!response.ok) {
         throw new Error(data.detail || '回调请求失败');
@@ -34,7 +48,12 @@ export const authApi = {
       
       return data;
     } catch (error) {
-      console.error('回调处理错误:', error);
+      // 添加错误上报
+      console.error('Auth callback error:', {
+        error,
+        code,
+        timestamp: new Date().toISOString()
+      });
       throw error;
     }
   },

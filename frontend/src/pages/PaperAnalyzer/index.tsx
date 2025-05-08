@@ -1,6 +1,6 @@
 // frontend/src/pages/PaperAnalyzer/index.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Upload, Button, Input, message, List, Layout, Spin, Select, Tooltip } from 'antd';
+import { Card, Upload, Button, Input, message, List, Layout, Spin, Select, Tooltip, Dropdown, Menu } from 'antd';
 import { 
   InboxOutlined, 
   SendOutlined, 
@@ -9,10 +9,15 @@ import {
   PaperClipOutlined,
   DeleteOutlined,
   RightOutlined,
-  LeftOutlined
+  LeftOutlined,
+  DownloadOutlined,
+  FileWordOutlined,
+  FilePdfOutlined,
+  FileMarkdownOutlined
 } from '@ant-design/icons';
 import { paperAnalyzerApi } from '../../services/paperAnalyzer';
 import './styles.css';
+import type { MenuProps } from 'antd';
 
 const { TextArea } = Input;
 const { Sider, Content } = Layout;
@@ -31,6 +36,22 @@ const PaperAnalyzer: React.FC = () => {
   const [translationLoading, setTranslationLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const [sending, setSending] = useState(false);
+
+  // 处理文件拖放
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      handleFileUpload(file);
+    }
+  };
+
+  // 处理拖拽悬停
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
 
   // 处理文件上传
   const handleFileUpload = async (file: File) => {
@@ -46,13 +67,13 @@ const PaperAnalyzer: React.FC = () => {
           const content = await paperAnalyzerApi.getDocumentContent(result.paper_id);
           setDocumentContent(content);
         }
-        message.success('论文分析完成');
+        message.success('文档分析完成');
       } else {
-        message.error(result.message || '论文分析失败');
+        message.error(result.message || '文档分析失败');
       }
     } catch (error) {
       console.error('Analysis error:', error);
-      message.error('论文分析失败');
+      message.error('文档分析失败');
     } finally {
       setLoading(false);
     }
@@ -66,8 +87,8 @@ const PaperAnalyzer: React.FC = () => {
     }
 
     try {
-      setLoading(true);
-      const result = await paperAnalyzerApi.askQuestion(question, 'current_paper_id');
+      setSending(true);
+      const result = await paperAnalyzerApi.askQuestion(question, currentPaperId);
       setResponses(prev => [...prev, { question, answer: result.response }]);
       setQuestion('');
       setSelectedFile(null);
@@ -81,7 +102,7 @@ const PaperAnalyzer: React.FC = () => {
     } catch (error) {
       message.error('提问失败');
     } finally {
-      setLoading(false);
+      setSending(false);
     }
   };
 
@@ -118,78 +139,57 @@ const PaperAnalyzer: React.FC = () => {
     }
   };
 
-  // 渲染文档内容（原文和翻译对照）
-  const renderDocumentContent = () => {
-    if (loading) {
-      return (
-        <div className="loading-container">
-          <Spin size="large" />
-          <p>正在分析文档...</p>
-        </div>
-      );
+  const handleDownload = async (format: string) => {
+    if (!translatedContent) {
+      message.warning('没有可下载的翻译内容');
+      return;
     }
 
-    if (!documentContent) {
-      return (
-        <div className="empty-document">
-          <FileTextOutlined style={{ fontSize: '48px' }} />
-          <p>请上传并分析文档</p>
-        </div>
+    try {
+      const response = await paperAnalyzerApi.downloadTranslation(
+        currentPaperId,
+        selectedLanguage,
+        format
       );
+      
+      // 创建下载链接
+      const blob = new Blob([response], { 
+        type: format === 'pdf' ? 'application/pdf' : 
+              format === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+              'text/markdown'
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `translated_${selectedFile?.name.split('.')[0]}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download error:', error);
+      message.error('下载失败');
     }
-
-    return (
-      <div className="document-viewer">
-        <div className="document-header">
-          <div className="header-left">
-            <FileTextOutlined /> {selectedFile?.name}
-          </div>
-          <div className="header-right">
-            <Select
-              style={{ width: 200 }}
-              placeholder="选择目标语言"
-              value={selectedLanguage}
-              onChange={setSelectedLanguage}
-            >
-              {Object.entries(languages).map(([code, name]) => (
-                <Option key={code} value={code}>{name}</Option>
-              ))}
-            </Select>
-            <Button
-              type="primary"
-              icon={<TranslationOutlined />}
-              onClick={handleTranslate}
-              loading={translationLoading}
-              disabled={!selectedLanguage}
-            >
-              翻译
-            </Button>
-          </div>
-        </div>
-        <div className="document-content-split">
-          <div className="original-content">
-            <h3>原文</h3>
-            {documentContent.split('\n').map((line, index) => (
-              <p key={index}>{line}</p>
-            ))}
-          </div>
-          <div className="translated-content">
-            <h3>翻译</h3>
-            {translatedContent ? (
-              translatedContent.split('\n').map((line, index) => (
-                <p key={index}>{line}</p>
-              ))
-            ) : (
-              <div className="empty-translation">
-                <TranslationOutlined style={{ fontSize: '24px' }} />
-                <p>请选择语言并点击翻译按钮</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
   };
+
+  // 在组件内定义菜单项
+  const downloadMenuItems: MenuProps['items'] = [
+    {
+      key: 'docx',
+      label: 'Word 文档',
+      icon: <FileWordOutlined />,
+    },
+    {
+      key: 'pdf',
+      label: 'PDF 文档',
+      icon: <FilePdfOutlined />,
+    },
+    {
+      key: 'md',
+      label: 'Markdown',
+      icon: <FileMarkdownOutlined />,
+    },
+  ];
 
   return (
     <Layout className="paper-analyzer-layout">
@@ -201,7 +201,20 @@ const PaperAnalyzer: React.FC = () => {
       >
         <div className="chat-container">
           <div className="chat-header">
-            <span className="chat-title">聊天</span>
+            {selectedFile ? (
+              <div className="selected-file">
+                <FileTextOutlined />
+                <span className="file-name">{selectedFile.name}</span>
+                <Button 
+                  type="text" 
+                  icon={<DeleteOutlined />} 
+                  onClick={() => setSelectedFile(null)}
+                  className="delete-file-btn"
+                />
+              </div>
+            ) : (
+              <div className="header-placeholder" />
+            )}
             <Button
               type="text"
               icon={collapsed ? <RightOutlined /> : <LeftOutlined />}
@@ -231,34 +244,21 @@ const PaperAnalyzer: React.FC = () => {
           </div>
           
           <div className="chat-input-container">
-            {selectedFile && (
-              <div className="selected-file">
-                <PaperClipOutlined />
-                <span className="file-name">{selectedFile.name}</span>
-                <Button 
-                  type="text" 
-                  icon={<DeleteOutlined />} 
-                  onClick={() => setSelectedFile(null)}
-                />
-              </div>
-            )}
-            <div className="input-area">
+            <div 
+              className="input-area"
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+            >
               <TextArea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="请输入您的问题或上传文件"
+                placeholder="请输入您的问题或拖拽文件到此处"
                 rows={3}
-                onPressEnter={(e) => {
-                  if (!e.shiftKey) {
-                    e.preventDefault();
-                    handleAsk();
-                  }
-                }}
               />
               <div className="input-actions">
                 <div className="left-actions">
                   <Upload
-                    accept=".pdf"
+                    accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md"
                     maxCount={1}
                     showUploadList={false}
                     beforeUpload={(file) => {
@@ -275,7 +275,7 @@ const PaperAnalyzer: React.FC = () => {
                   type="primary"
                   icon={<SendOutlined />}
                   onClick={handleAsk}
-                  loading={loading}
+                  loading={sending}
                   disabled={!currentPaperId}
                 >
                   发送
@@ -287,7 +287,73 @@ const PaperAnalyzer: React.FC = () => {
       </Sider>
 
       <Content className="paper-analyzer-content">
-        {renderDocumentContent()}
+        <div className="document-viewer">
+          <div className="document-header">
+            <div className="header-left">
+              <FileTextOutlined /> {selectedFile?.name}
+            </div>
+            <div className="header-right">
+              <Select
+                style={{ width: 200 }}
+                placeholder="选择目标语言"
+                value={selectedLanguage}
+                onChange={setSelectedLanguage}
+              >
+                {Object.entries(languages).map(([code, name]) => (
+                  <Option key={code} value={code}>{name}</Option>
+                ))}
+              </Select>
+              <Button
+                type="primary"
+                icon={<TranslationOutlined />}
+                onClick={handleTranslate}
+                loading={translationLoading}
+                disabled={!selectedLanguage}
+              >
+                翻译
+              </Button>
+            </div>
+          </div>
+          <div className="document-content-split">
+            <div className="original-content">
+              <h3>原文</h3>
+              {documentContent.split('\n').map((line, index) => (
+                <p key={index}>{line}</p>
+              ))}
+            </div>
+            <div className="translated-content">
+              <div className="content-header">
+                <h3>翻译</h3>
+                {translatedContent && (
+                  <Dropdown
+                    menu={{
+                      items: downloadMenuItems,
+                      onClick: ({ key }) => handleDownload(key as string)
+                    }}
+                    trigger={['click']}
+                  >
+                    <Button 
+                      type="text" 
+                      icon={<DownloadOutlined />} 
+                      className="download-button"
+                      title="下载翻译"
+                    />
+                  </Dropdown>
+                )}
+              </div>
+              {translatedContent ? (
+                translatedContent.split('\n').map((line, index) => (
+                  <p key={index}>{line}</p>
+                ))
+              ) : (
+                <div className="empty-translation">
+                  <TranslationOutlined style={{ fontSize: '24px' }} />
+                  <p>请选择语言并点击翻译按钮</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </Content>
     </Layout>
   );

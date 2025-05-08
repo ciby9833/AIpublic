@@ -269,14 +269,128 @@
 
 /* 优化响应式布局 */
 @media (max-width: 768px) {
+  .text-translate-container {
+    height: calc(100vh - 180px); /* 减去头部和底部的高度 */
+    padding: 8px;
+  }
+
   .text-area-wrapper {
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    height: 100%;
   }
-  
+
   .text-area-container {
-    width: 100%;
     min-height: 200px;
+    height: calc(50% - 6px); /* 减去间距的一半 */
+  }
+
+  .text-area {
+    min-height: 180px;
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  .language-select-group {
+    margin-bottom: 6px;
+  }
+
+  .language-select-group select {
+    max-width: 140px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
+  .language-select-group.target {
+    justify-content: flex-start;
+  }
+
+  .swap-button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .swap-button .material-icons {
+    font-size: 16px;
+  }
+
+  .text-area-controls,
+  .translated-controls {
+    bottom: 4px;
+    left: 4px;
+    gap: 2px;
+  }
+
+  .icon-button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .material-icons {
+    font-size: 16px;
+  }
+
+  .character-count {
+    bottom: 36px;
+    right: 4px;
+    font-size: 11px;
+  }
+
+  .shortcut-hint {
+    bottom: 4px;
+    right: 36px;
+    font-size: 11px;
+  }
+
+  .translation-options {
+    margin-bottom: 8px;
+    padding: 0 8px;
+  }
+
+  .translation-options .ant-switch {
+    transform: scale(0.9);
+  }
+}
+
+/* 更小屏幕的优化 */
+@media (max-width: 480px) {
+  .text-translate-container {
+    height: calc(100vh - 160px);
+    padding: 6px;
+  }
+
+  .text-area-wrapper {
+    gap: 8px;
+  }
+
+  .text-area-container {
+    min-height: 180px;
+  }
+
+  .text-area {
+    min-height: 160px;
+    padding: 10px;
+    font-size: 13px;
+  }
+
+  .language-select-group select {
+    max-width: 120px;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+
+  .swap-button {
+    width: 24px;
+    height: 24px;
+  }
+
+  .icon-button {
+    width: 24px;
+    height: 24px;
+  }
+
+  .material-icons {
+    font-size: 14px;
   }
 }
 

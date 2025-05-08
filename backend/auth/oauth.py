@@ -97,7 +97,7 @@ async def feishu_callback(code: str, state: str, db: Session = Depends(get_db)):
                     url=f"{FRONTEND_URL}/login?error=invalid_user_data"
                 )
             
-            required_fields = ["name", "email", "tenant_key"]
+            required_fields = ["name", "tenant_key"]
             missing_fields = [
                 field for field in required_fields 
                 if not user_data["data"].get(field)
@@ -185,6 +185,21 @@ async def feishu_callback(code: str, state: str, db: Session = Depends(get_db)):
                 "access_token": access_token,
                 "expires_at": expires_at.timestamp()
             }
+
+            # 添加日志记录
+            logger.info(f"Auth data for user {user.name}: {auth_data}")
+            
+            # 确保所有必要字段都存在
+            if not all([
+                auth_data.get("status"),
+                auth_data.get("user_info"),
+                auth_data.get("access_token"),
+                auth_data.get("expires_at")
+            ]):
+                logger.error(f"Missing required fields in auth data: {auth_data}")
+                return RedirectResponse(
+                    url=f"{FRONTEND_URL}/login?error=incomplete_data"
+                )
 
             # 7. 重定向到前端
             encoded_data = urllib.parse.quote(json.dumps(auth_data))

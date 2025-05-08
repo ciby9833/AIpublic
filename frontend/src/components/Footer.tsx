@@ -1,5 +1,4 @@
 import { useTranslation } from 'react-i18next';
-import LanguageSwitch from './LanguageSwitch';
 import './Footer.css';
 
 const Footer = () => {
@@ -12,7 +11,6 @@ const Footer = () => {
         <div className="copyright">
           © {currentYear} JT Cargo. {t('footer.allRightsReserved')}
         </div>
-        <LanguageSwitch />
       </div>
     </footer>
   );

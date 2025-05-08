@@ -12,7 +12,7 @@ interface FileUploadProps {
 const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
   return (
     <Dragger
-      accept=".pdf"
+      accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md"
       maxCount={1}
       disabled={disabled}
       beforeUpload={(file) => {
@@ -24,7 +24,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
         <InboxOutlined />
       </p>
       <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-      <p className="ant-upload-hint">支持 PDF 格式的论文文件</p>
+      <p className="ant-upload-hint">
+        支持 PDF、Word、PowerPoint、Excel、TXT、MD 格式的文件
+      </p>
     </Dragger>
   );
 };

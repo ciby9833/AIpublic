@@ -23,6 +23,10 @@ export default {
       ZH: 'Bahasa Mandarin',
       EN: 'Bahasa Inggris',
       ID: 'Bahasa Indonesia',
+      switch: 'Ganti Bahasa',
+      zh: 'Bahasa Mandarin',
+      en: 'Bahasa Inggris',
+      id: 'Bahasa Indonesia'
     },
     status: {
       uploading: 'Mengunggah dokumen...',

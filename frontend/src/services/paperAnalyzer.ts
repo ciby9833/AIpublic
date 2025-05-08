@@ -28,6 +28,23 @@ export const paperAnalyzerApi = {
   // 分析论文
   analyzePaper: async (file: File): Promise<PaperAnalysisResult> => {
     try {
+      // 验证文件类型
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'text/plain',
+        'text/markdown'
+      ];
+
+      if (!allowedTypes.includes(file.type)) {
+        throw new Error('Unsupported file type');
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 
@@ -195,5 +212,24 @@ export const paperAnalyzerApi = {
       console.error('Failed to translate paper:', error);
       throw error;
     }
-  }
+  },
+
+  async downloadTranslation(paperId: string, targetLang: string, format: string) {
+    const response = await fetch(`${API_BASE_URL}/api/paper/${paperId}/download`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ target_lang: targetLang, format }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail?.message || 'Download failed');
+    }
+    
+    return response.blob();
+  },
 };

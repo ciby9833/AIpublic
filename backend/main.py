@@ -1088,6 +1088,18 @@ async def analyze_paper(
     db: Session = Depends(get_db)
 ):
     try:
+        # 验证文件类型
+        allowed_extensions = ('.pdf', '.docx', '.doc', '.pptx', '.ppt', 
+                            '.xlsx', '.xls', '.txt', '.md')
+        if not file.filename.lower().endswith(allowed_extensions):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "INVALID_FILE_TYPE",
+                    "message": "Only PDF, Word, PowerPoint, Excel, TXT, and MD files are supported"
+                }
+            )
+        
         content = await file.read()
         analyzer = get_paper_analyzer(db)
         result = await analyzer.analyze_paper(content, file.filename)
@@ -1170,5 +1182,36 @@ async def get_supported_languages(db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=500,
             detail={"code": "LANGUAGES_ERROR", "message": str(e)}
+        )
+
+@app.post("/api/paper/{paper_id}/download")
+async def download_translation(
+    paper_id: str,
+    target_lang: str = Body(...),
+    format: str = Body(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        analyzer = get_paper_analyzer(db)
+        content = await analyzer.download_translation(paper_id, target_lang, format)
+        
+        # 设置正确的 Content-Type
+        content_type = {
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'pdf': 'application/pdf',
+            'md': 'text/markdown'
+        }.get(format, 'application/octet-stream')
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"attachment; filename=translated.{format}"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "DOWNLOAD_ERROR", "message": str(e)}
         )
 

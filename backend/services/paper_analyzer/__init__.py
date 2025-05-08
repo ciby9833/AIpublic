@@ -7,6 +7,12 @@ from sqlalchemy.orm import Session
 from models.paper import PaperAnalysis, PaperQuestion
 import uuid
 from sqlalchemy import func
+from docx import Document
+from fpdf import FPDF
+import markdown
+from io import BytesIO
+import tempfile
+import os
 
 class PaperAnalyzerService:
     def __init__(self, db: Session):
@@ -20,7 +26,7 @@ class PaperAnalyzerService:
         """分析论文文件"""
         try:
             # 处理论文内容
-            processed_content = await self.paper_processor.process(file_content)
+            processed_content = await self.paper_processor.process(file_content, filename)
             
             # 生成唯一的paper_id
             paper_id = str(uuid.uuid4())
@@ -94,9 +100,9 @@ class PaperAnalyzerService:
             
             # 存储问答记录
             paper_question = PaperQuestion(
-                paper_id=uuid.UUID(paper_id),
                 question=question,
-                answer=response
+                answer=response,
+                paper_ids=[uuid.UUID(paper_id)]  # 使用 paper_ids 数组
             )
             self.db.add(paper_question)
             self.db.commit()
@@ -169,3 +175,89 @@ class PaperAnalyzerService:
     async def get_supported_languages(self):
         """获取支持的语言列表"""
         return self.translator.get_supported_languages()
+
+    async def download_translation(self, paper_id: str, target_lang: str, format: str) -> bytes:
+        """下载翻译结果"""
+        try:
+            # 获取论文内容
+            paper = self.db.query(PaperAnalysis).filter(
+                PaperAnalysis.paper_id == uuid.UUID(paper_id)
+            ).first()
+            
+            if not paper:
+                raise Exception("Paper not found")
+            
+            # 获取翻译内容
+            translated_content = await self.translator.translate_text(
+                paper.content,
+                target_lang
+            )
+            
+            # 根据格式转换内容
+            if format == 'docx':
+                return await self._convert_to_docx(translated_content)
+            elif format == 'pdf':
+                return await self._convert_to_pdf(translated_content)
+            elif format == 'md':
+                return translated_content.encode('utf-8')
+            else:
+                raise ValueError(f"Unsupported format: {format}")
+                
+        except Exception as e:
+            raise Exception(f"Download error: {str(e)}")
+
+    async def _convert_to_docx(self, content: str) -> bytes:
+        """转换为 Word 文档"""
+        try:
+            doc = Document()
+            for paragraph in content.split('\n'):
+                if paragraph.strip():
+                    doc.add_paragraph(paragraph)
+            
+            # 保存到内存
+            output = BytesIO()
+            doc.save(output)
+            output.seek(0)
+            return output.getvalue()
+        except Exception as e:
+            raise Exception(f"Failed to convert to DOCX: {str(e)}")
+
+    async def _convert_to_pdf(self, content: str) -> bytes:
+        """转换为 PDF 文档"""
+        try:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            
+            # 处理内容
+            for line in content.split('\n'):
+                if line.strip():
+                    pdf.multi_cell(0, 10, txt=line)
+            
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                temp_path = temp_file.name
+            
+            # 保存到临时文件
+            pdf.output(temp_path)
+            
+            # 读取文件内容
+            with open(temp_path, 'rb') as f:
+                content = f.read()
+            
+            # 删除临时文件
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            
+            return content
+            
+        except Exception as e:
+            # 确保清理临时文件
+            if 'temp_path' in locals():
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+            raise Exception(f"Failed to convert to PDF: {str(e)}")

@@ -15,7 +15,7 @@
   margin: 0 auto;
   padding: 0 1rem;
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   height: 100%; /* 确保内容区域占满高度 */
   width: 100%; /* 确保内容区域占满宽度 */
@@ -25,33 +25,6 @@
   color: #666;
   font-size: 14px;
   line-height: 48px; /* 与 footer 高度一致，确保文字垂直居中 */
-  margin-right: auto; /* 将版权信息推到左边 */
-}
-
-/* 调整语言切换器在页脚中的样式 */
-.footer .language-switch {
-  padding: 4px 8px;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  background-color: white;
-  font-size: 14px;
-  color: #333;
-  cursor: pointer;
-  height: 32px; /* 设置固定高度 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: auto; /* 将语言切换器推到最右边 */
-}
-
-.footer .language-switch:hover {
-  border-color: var(--primary-color);
-}
-
-.footer .language-switch:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.1);
 }
 
 /* 添加响应式调整 */
@@ -62,11 +35,6 @@
   
   .copyright {
     line-height: 40px;
-    font-size: 12px;
-  }
-  
-  .footer .language-switch {
-    height: 28px;
     font-size: 12px;
   }
 }

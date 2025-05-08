@@ -22,6 +22,10 @@ export default {
       ZH: '中文',
       EN: '英文',
       ID: '印尼文',
+      switch: '切换语言',
+      zh: '中文',
+      en: '英文',
+      id: '印尼文'
     },
     status: {
       uploading: '正在上传文档...',

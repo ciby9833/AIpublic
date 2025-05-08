@@ -17,53 +17,53 @@ export const AuthCallback = () => {
         // 显示适当的错误消息
         // 可以使用antd的message组件
         message.error(getErrorMessage(error));
-        window.location.href = '/login';
+        navigate('/login');
         return;
       }
 
       const encodedData = urlParams.get('data');
       
-      console.log('Received encoded data:', encodedData);
+      // 添加日志记录
+      console.log('Auth callback data:', {
+        hasEncodedData: !!encodedData,
+        urlParams: Object.fromEntries(urlParams.entries())
+      });
 
       if (!encodedData) {
         throw new Error('No auth data received');
       }
 
       // 解码并解析认证数据
-      const decodedData = decodeURIComponent(encodedData);
-      console.log('Decoded data:', decodedData);
+      const data = JSON.parse(decodeURIComponent(encodedData));
       
-      const data = JSON.parse(decodedData);
-      console.log('Parsed data:', data);
+      // 添加数据验证日志
+      console.log('Parsed auth data:', {
+        hasStatus: !!data.status,
+        hasUserInfo: !!data.user_info,
+        hasAccessToken: !!data.access_token,
+        hasExpiresAt: !!data.expires_at
+      });
       
       if (data.status === 'success' && data.user_info && data.access_token) {
-        // 保存完整的用户信息
-        localStorage.setItem('user_info', JSON.stringify({
-          id: data.user_info.id,
-          name: data.user_info.name,
-          en_name: data.user_info.en_name,
-          email: data.user_info.email,
-          avatar_url: data.user_info.avatar_url,
-          tenant_key: data.user_info.tenant_key,
-          feishu_user_id: data.user_info.feishu_user_id
-        }));
+        // 保存认证数据
+        localStorage.setItem('user_info', JSON.stringify(data.user_info));
         localStorage.setItem('access_token', data.access_token);
         localStorage.setItem('expires_at', data.expires_at.toString());
         
         console.log('Auth data saved, redirecting to home');
         
-        // 使用 window.location.href 进行强制跳转
-        window.location.href = '/';
+        // 使用 navigate 而不是 window.location
+        navigate('/', { replace: true });
       } else {
         throw new Error('Invalid auth data');
       }
     } catch (error) {
       console.error('Auth callback error:', error);
-      // 添加更多错误信息
+      // 添加更详细的错误信息
       if (error instanceof SyntaxError) {
         console.error('JSON parsing error:', error.message);
       }
-      window.location.href = '/login';
+      navigate('/login');
     }
   }, [navigate]);
 
@@ -81,18 +81,8 @@ export const AuthCallback = () => {
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      flexDirection: 'column',
-      gap: '20px'
-    }}>
-      <div style={{ fontSize: '20px' }}>登录验证中...</div>
-      <div style={{ fontSize: '14px', color: '#666' }}>
-        请稍候，正在处理您的登录请求
-      </div>
+    <div className="auth-callback-container">
+      <div className="loading-message">登录验证中...</div>
     </div>
   );
 };

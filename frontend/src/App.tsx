@@ -46,14 +46,16 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       const accessToken = localStorage.getItem('access_token');
       const expiresAt = localStorage.getItem('expires_at');
       
-      console.log('验证登录状态:', {
+      // 添加认证状态日志
+      console.log('Auth check:', {
         hasUserInfo: !!userInfo,
         hasAccessToken: !!accessToken,
-        expiresAt: expiresAt
+        hasExpiresAt: !!expiresAt,
+        timestamp: new Date().toISOString()
       });
 
       if (!userInfo || !accessToken || !expiresAt) {
-        console.log('未找到登录信息，跳转到登录页');
+        console.log('Missing auth data, redirecting to login');
         navigate('/login', { replace: true });
         return;
       }
@@ -106,7 +108,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 function App() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [mode, setMode] = useState<TranslationMode>('text')
   const [status, setStatus] = useState<TranslationStatus>('idle')
   const [errorMessage, setErrorMessage] = useState<string>('')
@@ -328,11 +330,35 @@ function App() {
   // 下拉菜单项
   const dropdownItems: MenuProps['items'] = [
     {
+      key: 'language',
+      label: t('language.switch'),
+      children: [
+        {
+          key: 'zh',
+          label: t('language.zh'),
+          onClick: () => i18n.changeLanguage('zh')
+        },
+        {
+          key: 'en',
+          label: t('language.en'),
+          onClick: () => i18n.changeLanguage('en')
+        },
+        {
+          key: 'id',
+          label: t('language.id'),
+          onClick: () => i18n.changeLanguage('id')
+        }
+      ]
+    },
+    {
+      type: 'divider'
+    },
+    {
       key: 'logout',
-      label: '退出登录',
+      label: t('logout'),
       danger: true,
       onClick: handleLogout,
-    },
+    }
   ];
 
   // 定义主标签页的 items
@@ -395,6 +421,24 @@ function App() {
       )
     },
     {
+      key: 'paper-analyzer',
+      label: t('tabs.paperAnalyzer', 'AI问答&翻译'),
+      children: (
+        <div className="card paper-analyzer-card">
+          <PaperAnalyzer />
+        </div>
+      )
+    },
+    {
+      key: 'distance',
+      label: t('tabs.distanceCalculator', '距离计算'),
+      children: (
+        <div className="card">
+          <DistanceCalculator />
+        </div>
+      )
+    },
+    {
       key: 'glossary',
       label: t('tabs.glossaryManagement'),
       children: (
@@ -425,24 +469,6 @@ function App() {
           <UserManagement />
         </div>
       )
-    },
-    {
-      key: 'distance',
-      label: t('tabs.distanceCalculator', '距离计算'),
-      children: (
-        <div className="card">
-          <DistanceCalculator />
-        </div>
-      )
-    },
-    {
-      key: 'paper-analyzer',
-      label: t('tabs.paperAnalyzer', '文档分析'),
-      children: (
-        <div className="card paper-analyzer-card">
-          <PaperAnalyzer />
-        </div>
-      )
     }
   ];
 
@@ -456,7 +482,7 @@ function App() {
             <div className="app-container">
               <div className="container">
                 <div className="header">
-                  <h1>{t('title')}</h1>
+                  <h1 className="app-title">{t('title')}</h1>
                   {userInfo && (
                     <Dropdown menu={{ items: dropdownItems }} placement="bottomRight">
                       <div className="user-info">

@@ -427,30 +427,32 @@ const TextTranslate = ({ disabled }: TextTranslateProps) => {
     <div className="text-translate-container">
       <div className="text-area-wrapper">
         <div className="text-area-container">
-          {/* 添加 AI 翻译开关 */}
-          <div className="translation-options">
-            <Switch
-              checked={useAI}
-              onChange={(checked) => setUseAI(checked)}
-              disabled={disabled}
-              checkedChildren={t('textTranslate.useAI')}
-              unCheckedChildren={t('textTranslate.useDeepL')}
-            />
+          {/* 翻译选项和语言选择放在一起 */}
+          <div className="translation-header">
+            <div className="translation-options">
+              <Switch
+                checked={useAI}
+                onChange={(checked) => setUseAI(checked)}
+                disabled={disabled}
+                checkedChildren={t('textTranslate.useAI')}
+                unCheckedChildren={t('textTranslate.useDeepL')}
+              />
+            </div>
+            <div className="language-select-group">
+              <select
+                value={sourceLang}
+                onChange={handleSourceLangChange}
+                disabled={disabled || isTranslating}
+              >
+                {LANGUAGES.filter(lang => !useAI || !lang.autoDetect).map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.autoDetect ? `${lang.name}` : lang.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           
-          <div className="language-select-group">
-            <select
-              value={sourceLang}
-              onChange={handleSourceLangChange}
-              disabled={disabled || isTranslating}
-            >
-              {LANGUAGES.filter(lang => !useAI || !lang.autoDetect).map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.autoDetect ? `${lang.name}` : lang.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <textarea
             className="text-area source"
             placeholder={t('textTranslate.sourcePlaceholder')}
@@ -495,6 +497,7 @@ const TextTranslate = ({ disabled }: TextTranslateProps) => {
         </div>
 
         <div className="text-area-container">
+          {/* 目标语言选择器 */}
           <div className="language-select-group target">
             <button
               className="swap-button"
