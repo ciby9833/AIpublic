@@ -44,8 +44,8 @@ SUPPORTED_LANGUAGES = {
 }
 
 # 文件配置
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_EXTENSIONS = {'.pdf'}
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.pptx', '.xlsx', '.txt', '.md'}
 
 # 向量检索配置
 TOP_K_RESULTS = 3

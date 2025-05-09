@@ -7,9 +7,9 @@ import TranslationStatus from './components/TranslationStatus'
 import TextTranslate from './components/TextTranslate'
 import TranslationModeSwitch from './components/TranslationModeSwitch'
 import Footer from './components/Footer'
-import { Tabs, Dropdown } from 'antd'
+import { Tabs, Dropdown, Layout } from 'antd'
 import { GlossaryList, GlossaryEditor } from './components/GlossaryManager'
-import './style.css'
+import './style.css' 
 import { translateDocument } from './services/api'
 import GlossaryDatabaseSearch from './components/GlossaryManager/GlossaryDatabaseSearch'
 import { API_BASE_URL } from './config/env'
@@ -18,10 +18,12 @@ import { AuthCallback } from './pages/AuthCallback'
 import { FeishuLogin } from './components/Auth/FeishuLogin'
 import { authApi } from './services/auth'
 import type { MenuProps } from 'antd'
-import { UserOutlined } from '@ant-design/icons'
+import { UserOutlined, MenuUnfoldOutlined, MenuFoldOutlined } from '@ant-design/icons'
 import UserManagement from './pages/UserManagement'
 import DistanceCalculator from './pages/DistanceCalculator'
 import PaperAnalyzer from './pages/PaperAnalyzer'
+
+const { Header, Content, Footer: AntFooter } = Layout;
 
 export type TranslationStatus = 
     'idle' | 
@@ -60,7 +62,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      const now = Date.now() / 1000;   // 作用：获取当前时间戳
+      const now = Date.now() / 1000;
       const expiresTime = Number(expiresAt);
       
       // 如果距离过期还有1小时，就刷新token
@@ -121,6 +123,12 @@ function App() {
   )
   const [useGlossary, setUseGlossary] = useState<boolean>(true)
   const [userInfo, setUserInfo] = useState<any>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  // 添加当前活动标签页的状态
+  const [activeTab, setActiveTab] = useState<string>(
+    localStorage.getItem('activeTab') || 'translation'
+  );
 
   useEffect(() => {
     localStorage.setItem('targetLanguage', targetLanguage);
@@ -298,7 +306,7 @@ function App() {
         setErrorMessage(t('error.translationFailed'));
     }
   };
-  // 打印当前状态日志
+
   useEffect(() => {
     console.log('Current status:', status);
     console.log('Selected file:', selectedFile?.name);
@@ -360,6 +368,12 @@ function App() {
       onClick: handleLogout,
     }
   ];
+
+  // 处理标签页切换
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    localStorage.setItem('activeTab', key);
+  };
 
   // 定义主标签页的 items
   const mainTabItems = [
@@ -500,7 +514,13 @@ function App() {
                     </Dropdown>
                   )}
                 </div>
-                <Tabs defaultActiveKey="translation" className="main-tabs" items={mainTabItems} />
+                <Tabs 
+                  activeKey={activeTab}
+                  onChange={handleTabChange}
+                  defaultActiveKey="translation" 
+                  className="main-tabs" 
+                  items={mainTabItems} 
+                />
               </div>
               <Footer />
             </div>

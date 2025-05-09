@@ -1,6 +1,6 @@
 export default {
   translation: {
-    title: 'Cargo翻译神器',
+    title: 'Cargo Tool',
     useGlossary: '使用术语表',
     sourceLanguage: '源语言',  // 'Source Language' / 'Bahasa Sumber'
     targetLanguage: '目标语言', 

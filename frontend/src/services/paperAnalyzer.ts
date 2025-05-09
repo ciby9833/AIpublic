@@ -1,16 +1,28 @@
 // frontend/src/services/paperAnalyzer.ts  文档阅读
 import { API_BASE_URL } from '../config/env';
+import { ChatResponse } from '../types/chat';
+
+export interface LineMapping {
+  [key: string]: {
+    content: string;
+    page?: number;
+    start_pos?: number;
+    end_pos?: number;
+  }
+}
 
 export interface PaperAnalysisResult {
   status: string;
   message: string;
   paper_id?: string;  // 添加paper_id字段
   content?: string;   // 添加content字段
+  line_mapping?: LineMapping;  // 添加行号映射
+  total_lines?: number;         // 添加总行数
 }
 
 export interface QuestionResponse {
   status: string;
-  response: string;
+  response: string | ChatResponse;
 }
 
 export interface QuestionHistory {
@@ -48,6 +60,9 @@ export const paperAnalyzerApi = {
       const formData = new FormData();
       formData.append('file', file);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5分钟超时
+
       const response = await fetch(
         `${API_BASE_URL}/api/paper/analyze`,
         {
@@ -56,24 +71,50 @@ export const paperAnalyzerApi = {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
           },
           body: formData,
-          credentials: 'include'
+          credentials: 'include',
+          signal: controller.signal
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
       }
 
-      return await response.json();
-    } catch (error) {
-      console.error('Failed to analyze paper:', error);
-      throw error;
+      const result = await response.json();
+      
+      // 添加数据验证
+      if (!result.content) {
+        console.warn('No content in response');
+      }
+      
+      if (!result.line_mapping || Object.keys(result.line_mapping).length === 0) {
+        console.warn('No line mapping in response');
+      }
+
+      return result;
+    } catch (error: unknown) {  // 明确指定 error 类型为 unknown
+      if (error instanceof Error) {  // 类型守卫
+        if (error.name === 'AbortError') {
+          throw new Error('分析超时，请稍后重试');
+        }
+        console.error('Failed to analyze paper:', error);
+        throw error;
+      }
+      // 处理未知错误
+      console.error('Unknown error occurred:', error);
+      throw new Error('文档分析过程中发生未知错误');
     }
   },
 
   // 获取文档内容
-  getDocumentContent: async (paperId: string): Promise<string> => {
+  getDocumentContent: async (paperId: string): Promise<{
+    content: string;
+    line_mapping: LineMapping;
+    total_lines: number;
+  }> => {
     if (!paperId) {
       throw new Error('Paper ID is required');
     }
@@ -95,8 +136,7 @@ export const paperAnalyzerApi = {
         throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      return data.content;
+      return await response.json();
     } catch (error) {
       console.error('Failed to get document content:', error);
       throw error;

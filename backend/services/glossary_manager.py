@@ -1,5 +1,4 @@
-# backend/services/glossary_manager.py
-# 术语表管理器
+# backend/services/glossary_manager.py    术语表管理器
 import httpx
 import os
 from typing import Dict, List, Optional

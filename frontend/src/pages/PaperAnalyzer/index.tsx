@@ -1,6 +1,6 @@
 // frontend/src/pages/PaperAnalyzer/index.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { Card, Upload, Button, Input, message, List, Layout, Spin, Select, Tooltip, Dropdown, Menu } from 'antd';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Card, Upload, Button, Input, message, List, Layout, Spin, Select, Tooltip, Dropdown, Menu, Switch } from 'antd';
 import { 
   InboxOutlined, 
   SendOutlined, 
@@ -13,20 +13,37 @@ import {
   DownloadOutlined,
   FileWordOutlined,
   FilePdfOutlined,
-  FileMarkdownOutlined
+  FileMarkdownOutlined,
+  CloseCircleOutlined,
+  CheckCircleOutlined
 } from '@ant-design/icons';
 import { paperAnalyzerApi } from '../../services/paperAnalyzer';
 import './styles.css';
 import type { MenuProps } from 'antd';
+import ChatMessage from './components/index';
+import { ChatMessage as ChatMessageType } from '../../types/chat';
+import { List as VirtualList, AutoSizer, ListRowProps } from 'react-virtualized';
+import { throttle } from 'lodash';
 
 const { TextArea } = Input;
 const { Sider, Content } = Layout;
 const { Option } = Select;
 
+interface LineInfo {
+  content: string;
+  page?: number;
+  start_pos?: number;
+  end_pos?: number;
+}
+
+interface LineMapping {
+  [key: string]: LineInfo;
+}
+
 const PaperAnalyzer: React.FC = () => {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
-  const [responses, setResponses] = useState<Array<{question: string, answer: string}>>([]);
+  const [responses, setResponses] = useState<ChatMessageType[]>([]);
   const [documentContent, setDocumentContent] = useState<string>('');
   const [currentPaperId, setCurrentPaperId] = useState<string>('');
   const [collapsed, setCollapsed] = useState(false);
@@ -37,6 +54,13 @@ const PaperAnalyzer: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [sending, setSending] = useState(false);
+  const [lineMapping, setLineMapping] = useState<LineMapping>({});
+  const [totalLines, setTotalLines] = useState<number>(0);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [visibleLines, setVisibleLines] = useState<{start: number, end: number}>({start: 0, end: 50});
+  const [syncScrolling, setSyncScrolling] = useState<boolean>(true);
+  const originalContentRef = useRef<HTMLDivElement>(null);
+  const translatedContentRef = useRef<HTMLDivElement>(null);
 
   // 处理文件拖放
   const handleDrop = (e: React.DragEvent) => {
@@ -56,18 +80,44 @@ const PaperAnalyzer: React.FC = () => {
   // 处理文件上传
   const handleFileUpload = async (file: File) => {
     try {
+      setAnalyzing(true);
       setLoading(true);
       setSelectedFile(file);
+      
+      setResponses(prev => [...prev, {
+        question: `正在分析文件: ${file.name}`,
+        answer: '请耐心等待，正在处理中...',
+        timestamp: new Date().toISOString()
+      }]);
+
       const result = await paperAnalyzerApi.analyzePaper(file);
       if (result.status === 'success' && result.paper_id) {
         setCurrentPaperId(result.paper_id);
         if (result.content) {
+          console.log("Setting document content, length:", result.content.length);
           setDocumentContent(result.content);
+          
+          // Instead of creating complex mapping, just set an empty object
+          // The display will use direct line splitting from documentContent
+          console.log("No line mapping provided, using direct content display");
+          setLineMapping({});
+          
+          setTotalLines(result.total_lines || result.content.split('\n').length);
         } else {
-          const content = await paperAnalyzerApi.getDocumentContent(result.paper_id);
-          setDocumentContent(content);
+          const contentData = await paperAnalyzerApi.getDocumentContent(result.paper_id);
+          setDocumentContent(contentData.content);
+          setLineMapping(contentData.line_mapping || {});
+          setTotalLines(contentData.total_lines || 0);
+          console.log("Document content fetched:", contentData.content.substring(0, 100));
+          console.log("Line mapping:", Object.keys(contentData.line_mapping || {}).length);
         }
         message.success('文档分析完成');
+        
+        setResponses(prev => [...prev, {
+          question: `文件分析完成: ${file.name}`,
+          answer: '现在您可以开始提问了',
+          timestamp: new Date().toISOString()
+        }]);
       } else {
         message.error(result.message || '文档分析失败');
       }
@@ -75,6 +125,7 @@ const PaperAnalyzer: React.FC = () => {
       console.error('Analysis error:', error);
       message.error('文档分析失败');
     } finally {
+      setAnalyzing(false);
       setLoading(false);
     }
   };
@@ -89,7 +140,11 @@ const PaperAnalyzer: React.FC = () => {
     try {
       setSending(true);
       const result = await paperAnalyzerApi.askQuestion(question, currentPaperId);
-      setResponses(prev => [...prev, { question, answer: result.response }]);
+      setResponses(prev => [...prev, { 
+        question, 
+        answer: result.response,
+        timestamp: new Date().toISOString()
+      }]);
       setQuestion('');
       setSelectedFile(null);
       
@@ -191,6 +246,43 @@ const PaperAnalyzer: React.FC = () => {
     },
   ];
 
+  // Update scroll handlers for the new content structure
+  const handleOriginalScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (!syncScrolling || !translatedContentRef.current || !translatedContent) return;
+    
+    const originalElement = e.currentTarget;
+    const originalScrollable = originalElement.scrollHeight - originalElement.clientHeight;
+    if (originalScrollable <= 0) return;
+    
+    const scrollPercentage = originalElement.scrollTop / originalScrollable;
+    
+    const translatedElement = translatedContentRef.current.querySelector('.content-wrapper');
+    if (!translatedElement) return;
+    
+    const translatedScrollable = translatedElement.scrollHeight - translatedElement.clientHeight;
+    if (translatedScrollable <= 0) return;
+    
+    translatedElement.scrollTop = scrollPercentage * translatedScrollable;
+  }, [syncScrolling, translatedContent]);
+
+  const handleTranslatedScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (!syncScrolling || !originalContentRef.current || !documentContent) return;
+    
+    const translatedElement = e.currentTarget;
+    const translatedScrollable = translatedElement.scrollHeight - translatedElement.clientHeight;
+    if (translatedScrollable <= 0) return;
+    
+    const scrollPercentage = translatedElement.scrollTop / translatedScrollable;
+    
+    const originalElement = originalContentRef.current.querySelector('.content-wrapper');
+    if (!originalElement) return;
+    
+    const originalScrollable = originalElement.scrollHeight - originalElement.clientHeight;
+    if (originalScrollable <= 0) return;
+    
+    originalElement.scrollTop = scrollPercentage * originalScrollable;
+  }, [syncScrolling, documentContent]);
+
   return (
     <Layout className="paper-analyzer-layout">
       <Sider 
@@ -229,31 +321,23 @@ const PaperAnalyzer: React.FC = () => {
               itemLayout="vertical"
               dataSource={responses}
               renderItem={(item) => (
-                <List.Item className="chat-message">
-                  <div className="message-bubble question-bubble">
-                    <div className="message-header">问</div>
-                    <div className="message-content">{item.question}</div>
-                  </div>
-                  <div className="message-bubble answer-bubble">
-                    <div className="message-header">答</div>
-                    <div className="message-content">{item.answer}</div>
-                  </div>
-                </List.Item>
+                <ChatMessage message={item} />
               )}
             />
           </div>
           
           <div className="chat-input-container">
             <div 
-              className="input-area"
+              className={`input-area ${analyzing ? 'analyzing' : ''}`}
               onDrop={handleDrop}
               onDragOver={handleDragOver}
             >
               <TextArea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="请输入您的问题或拖拽文件到此处"
+                placeholder={analyzing ? "正在分析文档，请稍候..." : "请输入您的问题或拖拽文件到此处"}
                 rows={3}
+                disabled={analyzing}
               />
               <div className="input-actions">
                 <div className="left-actions">
@@ -265,9 +349,13 @@ const PaperAnalyzer: React.FC = () => {
                       handleFileUpload(file);
                       return false;
                     }}
+                    disabled={analyzing}
                   >
-                    <Tooltip title="上传文件">
-                      <Button icon={<PaperClipOutlined />} />
+                    <Tooltip title={analyzing ? "正在分析中..." : "上传文件"}>
+                      <Button 
+                        icon={<PaperClipOutlined />} 
+                        disabled={analyzing}
+                      />
                     </Tooltip>
                   </Upload>
                 </div>
@@ -275,10 +363,10 @@ const PaperAnalyzer: React.FC = () => {
                   type="primary"
                   icon={<SendOutlined />}
                   onClick={handleAsk}
-                  loading={sending}
-                  disabled={!currentPaperId}
+                  loading={sending || analyzing}
+                  disabled={!currentPaperId || analyzing}
                 >
-                  发送
+                  {analyzing ? "分析中..." : "发送"}
                 </Button>
               </div>
             </div>
@@ -315,36 +403,70 @@ const PaperAnalyzer: React.FC = () => {
             </div>
           </div>
           <div className="document-content-split">
-            <div className="original-content">
+            <div className="original-content" ref={originalContentRef}>
               <h3>原文</h3>
-              {documentContent.split('\n').map((line, index) => (
-                <p key={index}>{line}</p>
-              ))}
+              {documentContent ? (
+                <div className="content-wrapper" 
+                  style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
+                  onScroll={handleOriginalScroll}
+                >
+                  {documentContent.split('\n').map((line, index) => (
+                    <div key={index} className="line-container">
+                      <span className="line-number">{index + 1}</span>
+                      <span className="line-content">{line}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-document">
+                  <FileTextOutlined style={{ fontSize: '24px' }} />
+                  <p>请上传文档或等待分析完成</p>
+                </div>
+              )}
             </div>
-            <div className="translated-content">
+            <div className="translated-content" ref={translatedContentRef}>
               <div className="content-header">
                 <h3>翻译</h3>
-                {translatedContent && (
-                  <Dropdown
-                    menu={{
-                      items: downloadMenuItems,
-                      onClick: ({ key }) => handleDownload(key as string)
-                    }}
-                    trigger={['click']}
-                  >
-                    <Button 
-                      type="text" 
-                      icon={<DownloadOutlined />} 
-                      className="download-button"
-                      title="下载翻译"
-                    />
-                  </Dropdown>
-                )}
+                <div className="header-actions">
+                  {translatedContent && (
+                    <>
+                      <Switch
+                        size="small"
+                        checked={syncScrolling}
+                        onChange={(checked) => setSyncScrolling(checked)}
+                        checkedChildren="同步滚动"
+                        unCheckedChildren="独立滚动"
+                      />
+                      <Dropdown
+                        menu={{
+                          items: downloadMenuItems,
+                          onClick: ({ key }) => handleDownload(key as string)
+                        }}
+                        trigger={['click']}
+                      >
+                        <Button 
+                          type="text" 
+                          icon={<DownloadOutlined />} 
+                          className="download-button"
+                          title="下载翻译"
+                        />
+                      </Dropdown>
+                    </>
+                  )}
+                </div>
               </div>
               {translatedContent ? (
-                translatedContent.split('\n').map((line, index) => (
-                  <p key={index}>{line}</p>
-                ))
+                <div className="content-wrapper" 
+                  style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
+                  onScroll={handleTranslatedScroll}
+                >
+                  {translatedContent.split('\n').map((line, index) => (
+                    <div key={index} className="line-container">
+                      <span className="line-number">{index + 1}</span>
+                      <span className="line-content">{line}</span>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="empty-translation">
                   <TranslationOutlined style={{ fontSize: '24px' }} />

@@ -1,6 +1,21 @@
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
+from typing import TypedDict, List, Optional
+
+class SourceInfo(TypedDict):
+    line_number: int
+    content: str
+    page: int
+    start_pos: int
+    end_pos: int
+    is_scanned: bool
+    similarity: float
+
+class AIResponse(TypedDict):
+    answer: str
+    sources: List[SourceInfo]
+    confidence: float
 
 class AIManager:
     def __init__(self):
@@ -15,12 +30,16 @@ class AIManager:
         # 使用正确的模型名称
         self.model = genai.GenerativeModel('gemini-1.5-pro')
 
-    async def get_response(self, question: str, context: str) -> str:
+    async def get_response(self, question: str, context: str) -> dict:
         try:
             if not context:
-                return "抱歉，我无法找到相关的上下文信息来回答这个问题。"
+                return {
+                    "answer": "抱歉，我无法找到相关的上下文信息来回答这个问题。",
+                    "sources": [],
+                    "confidence": 0.0
+                }
 
-            # 构建更专业的提示词
+            # 构建提示词
             prompt = f"""你是一个专业的论文分析助手。请基于以下上下文回答问题。
 
 上下文：
@@ -44,10 +63,34 @@ class AIManager:
             
             # 检查响应
             if not response or not response.text:
-                return "抱歉，我无法生成有效的回答。请尝试重新提问或检查文档内容。"
-                
-            return response.text
+                return {
+                    "answer": "抱歉，我无法生成有效的回答。请尝试重新提问或检查文档内容。",
+                    "sources": [],
+                    "confidence": 0.0
+                }
+            
+            # 返回结构化数据，确保所有数值都是 Python 原生类型
+            return {
+                "answer": str(response.text),
+                "sources": [
+                    {
+                        "line_number": int(source.get("line_number", 0)),
+                        "content": str(source.get("content", "")),
+                        "page": int(source.get("page", 1)),
+                        "start_pos": int(source.get("start_pos", 0)),
+                        "end_pos": int(source.get("end_pos", 0)),
+                        "is_scanned": bool(source.get("is_scanned", False)),
+                        "similarity": float(source.get("similarity", 0.0))
+                    }
+                    for source in context.get("chunks", [])
+                ],
+                "confidence": float(getattr(response, 'confidence', 0.8))
+            }
             
         except Exception as e:
-            print(f"AI response error details: {str(e)}")  # 添加详细日志
-            return f"抱歉，生成回答时出现错误：{str(e)}"
+            print(f"AI response error details: {str(e)}")
+            return {
+                "answer": f"抱歉，生成回答时出现错误：{str(e)}",
+                "sources": [],
+                "confidence": 0.0
+            }

@@ -22,13 +22,15 @@
         "react-dom": "^18.2.0",
         "react-dropzone": "^14.2.3",
         "react-i18next": "^15.4.1",
-        "react-router-dom": "^6.30.0"
+        "react-router-dom": "^6.30.0",
+        "react-virtualized": "^9.22.6"
     },
     "devDependencies": {
         "@types/lodash": "^4.17.16",
         "@types/node": "^20.17.31",
         "@types/react": "^18.3.20",
         "@types/react-dom": "^18.3.6",
+        "@types/react-virtualized": "^9.22.2",
         "@typescript-eslint/eslint-plugin": "^6.14.0",
         "@typescript-eslint/parser": "^6.14.0",
         "@vitejs/plugin-react": "^4.2.1",

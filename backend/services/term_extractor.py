@@ -415,43 +415,30 @@ class GeminiTermExtractor:
                     "error": "Invalid input - empty, meaningless, or contains only symbols/emojis"
                 }
 
-            # 构建增强的上下文理解和翻译提示词
+            # 1. 首先进行语言检测
+            detected_language = await self._detect_language(text)
+            
+            # 2. 分析文本领域
+            domain = await self._analyze_text_domain(text)
+            
+            # 3. 构建增强的上下文理解和翻译提示词
             prompt = f"""
-            You are a cultural-aware multilingual translator with deep understanding of Chinese, English, and Indonesian languages, cultures, and societies.
-
-            Analyze the input text internally (DO NOT include analysis in output) for:
-            1. Language and Cultural Context:
-               - Source language and cultural background
-               - Regional variations and dialects
-               - Cultural-specific references
-               - Religious or cultural sensitivities
-
-            2. Contextual Elements:
-               - Professional/social context (formal/informal)
-               - Time-sensitive elements (festivals, seasons, events)
-               - Location-specific references
-               - Organization names and titles
-               - Colloquialisms and idioms
-
-            3. Emotional and Pragmatic Aspects:
-               - Emotional undertones
-               - Speaker's intention
-               - Social relationships implied
-               - Level of politeness
-               - Humor or irony if present
-
-            Based on the analysis, translate the text into all three languages while:
-            - Maintaining the original intention and emotional tone
-            - Adapting cultural references appropriately
-            - Using equivalent idioms or expressions when appropriate
-            - Preserving the level of formality
-            - Ensuring cultural sensitivity
-            - Adapting time and location references as needed
-
-            Input text:
-            {text}
-
-            Provide ONLY the translations in this exact format:
+            You are a culturally aware translator proficient in Chinese, English, and Indonesian. 
+            
+            The input text appears to be in {detected_language} and relates to the {domain} domain.
+            
+            Translate the input text into all three languages, preserving:
+            - Original intention and emotional tone
+            - Cultural context, adapting references and idioms
+            - Formality level and politeness
+            - Time/location-specific elements as needed
+            
+            Special considerations for {domain} domain:
+            {self._get_domain_guidelines(domain)}
+            
+            Input text: {text}
+            
+            Output ONLY translations in this format:
             - English translation: [translation]
             - Chinese translation: [translation]
             - Indonesian translation: [translation]
@@ -463,11 +450,214 @@ class GeminiTermExtractor:
             # 解析响应，只保留翻译结果
             result = self._parse_translations_only(response.text)
             
+            # 添加检测到的语言
+            result["detected_language"] = detected_language
+            
+            # 4. 进行回译检验（双向确认）
+            if len(text) <= 500:  # 限制长文本回译以避免API过度使用
+                verification_results = await self._verify_translations(text, result, detected_language)
+                result["verification_score"] = verification_results["score"]
+            
             return result
 
         except Exception as e:
             logger.error(f"Enhanced multilingual translation failed: {str(e)}\n{traceback.format_exc()}")
-            return {"error": str(e)}
+            return {"error": str(e), "detected_language": "auto"}
+
+    async def _detect_language(self, text: str) -> str:
+        """检测输入文本的语言"""
+        try:
+            # 使用短提示词以减少API使用量
+            prompt = f"""
+            Detect the language of the following text. 
+            Respond with ONLY the language code: 'en' for English, 'zh' for Chinese, 'id' for Indonesian, or 'other'.
+            
+            Text: {text[:200]}
+            """
+            
+            response = await self._generate_with_retry_backoff([{"text": prompt}])
+            lang_code = response.text.strip().lower()
+            
+            # 规范化语言代码
+            if 'english' in lang_code or 'en' in lang_code:
+                return 'en'
+            elif 'chinese' in lang_code or 'zh' in lang_code or '中文' in lang_code:
+                return 'zh'
+            elif 'indonesian' in lang_code or 'id' in lang_code or 'bahasa' in lang_code:
+                return 'id'
+            else:
+                return 'other'
+        except Exception as e:
+            logger.warning(f"Language detection failed: {str(e)}")
+            return 'auto'
+
+    async def _analyze_text_domain(self, text: str) -> str:
+        """分析文本属于哪个领域"""
+        try:
+            # 使用短文本以减少API使用量
+            sample = text[:300]
+            
+            # 关键词映射到领域
+            domain_keywords = {
+                'logistics': ['shipping', 'delivery', 'transport', 'cargo', 'freight', '物流', '运输', '货物', '配送', 'pengiriman', 'kargo'],
+                'legal': ['contract', 'agreement', 'clause', 'law', '合同', '法律', '条款', '协议', 'kontrak', 'perjanjian', 'hukum'],
+                'technical': ['system', 'software', 'hardware', 'technology', '系统', '软件', '硬件', '技术', 'sistem', 'perangkat', 'teknologi'],
+                'business': ['sales', 'marketing', 'retail', 'franchise', '销售', '营销', '零售', '加盟', 'penjualan', 'pemasaran', 'waralaba'],
+                'finance': ['payment', 'money', 'cost', 'price', 'fee', '支付', '金额', '费用', '价格', 'pembayaran', 'biaya', 'harga'],
+                'conversation': ['hello', 'thanks', 'please', 'you', '你好', '谢谢', '请', '您', 'halo', 'terima kasih', 'tolong']
+            }
+            
+            # 简单的关键词匹配
+            matched_domains = {}
+            for domain, keywords in domain_keywords.items():
+                count = sum(1 for keyword in keywords if keyword.lower() in sample.lower())
+                matched_domains[domain] = count
+            
+            # 如果关键词匹配不够明确，使用AI分析
+            max_count = max(matched_domains.values()) if matched_domains else 0
+            if max_count < 2:
+                prompt = f"""
+                Classify the domain of this text into ONE of: logistics, legal, technical, business, finance, or conversation.
+                Respond with ONLY the domain name, no explanation.
+                
+                Text: {sample}
+                """
+                
+                response = await self._generate_with_retry_backoff([{"text": prompt}])
+                domain = response.text.strip().lower()
+                
+                # 规范化领域名称
+                for valid_domain in domain_keywords.keys():
+                    if valid_domain in domain:
+                        return valid_domain
+                return 'general'
+            else:
+                # 返回匹配度最高的领域
+                return max(matched_domains.items(), key=lambda x: x[1])[0]
+        
+        except Exception as e:
+            logger.warning(f"Domain analysis failed: {str(e)}")
+            return 'general'
+
+    def _get_domain_guidelines(self, domain: str) -> str:
+        """根据不同领域返回特定的翻译指南"""
+        guidelines = {
+            'logistics': """
+            - Maintain technical accuracy for logistics terminology
+            - Preserve shipping terms, dimensions, and weight units appropriately
+            - Use standard international transport terms (Incoterms) where applicable
+            - Maintain numerical values and units consistently
+            """,
+            
+            'legal': """
+            - Preserve legal terminology with precision
+            - Maintain formal tone and structure
+            - Ensure contractual terms have exact equivalents in target languages
+            - Avoid ambiguity that could change legal interpretation
+            """,
+            
+            'technical': """
+            - Keep technical terms consistent
+            - Maintain accuracy in technical specifications
+            - Preserve formatting of model numbers, measurements and units
+            - Use industry-standard terminology in each language
+            """,
+            
+            'business': """
+            - Adapt business idioms appropriately for each culture
+            - Maintain appropriate level of formality for business context
+            - Preserve marketing tone and persuasive elements
+            - Adapt franchise/retail concepts to local business practices
+            """,
+            
+            'finance': """
+            - Preserve numerical values exactly
+            - Format currencies according to local conventions
+            - Maintain precision in financial terminology
+            - Ensure payment terms are clearly translated
+            """,
+            
+            'conversation': """
+            - Maintain conversational tone and friendliness
+            - Adapt greetings and pleasantries to cultural norms
+            - Preserve emotional nuances and politeness levels
+            - Use natural, flowing language appropriate for dialogue
+            """,
+            
+            'general': """
+            - Maintain general accuracy and tone
+            - Preserve the main message and intent
+            - Adapt cultural references appropriately
+            - Use natural language in each target language
+            """
+        }
+        
+        return guidelines.get(domain, guidelines['general'])
+
+    async def _verify_translations(self, original_text: str, translations: dict, detected_lang: str) -> dict:
+        """使用回译验证翻译质量"""
+        try:
+            # 选择适当的目标语言进行回译
+            back_translation_lang = ''
+            back_translation_text = ''
+            
+            if detected_lang == 'zh':
+                back_translation_lang = 'english'
+                back_translation_text = translations['english']
+            elif detected_lang == 'en':
+                back_translation_lang = 'chinese' 
+                back_translation_text = translations['chinese']
+            elif detected_lang == 'id':
+                back_translation_lang = 'english'
+                back_translation_text = translations['english']
+            else:
+                # 默认使用英语
+                back_translation_lang = 'english'
+                back_translation_text = translations['english']
+            
+            # 执行回译
+            prompt = f"""
+            Translate the following {back_translation_lang} text back to {detected_lang}:
+            
+            Text: {back_translation_text}
+            
+            Respond with ONLY the translation, no explanations.
+            """
+            
+            response = await self._generate_with_retry_backoff([{"text": prompt}])
+            back_translated = response.text.strip()
+            
+            # 比较原文和回译结果的相似度
+            similarity_prompt = f"""
+            Compare these two texts and rate their semantic similarity on a scale of 0-100,
+            where 100 means identical meaning and 0 means completely different:
+            
+            Text 1: {original_text}
+            Text 2: {back_translated}
+            
+            Respond with ONLY a number from 0-100.
+            """
+            
+            similarity_response = await self._generate_with_retry_backoff([{"text": similarity_prompt}])
+            similarity_score = similarity_response.text.strip()
+            
+            # 尝试提取数字
+            score_match = re.search(r'\d+', similarity_score)
+            if score_match:
+                score = int(score_match.group())
+                score = min(100, max(0, score))  # 确保在0-100范围内
+            else:
+                score = 70  # 默认值
+            
+            return {
+                "original": original_text,
+                "back_translated": back_translated,
+                "score": score
+            }
+            
+        except Exception as e:
+            logger.warning(f"Translation verification failed: {str(e)}")
+            return {"score": 0}
 
     def _parse_translations_only(self, response: str) -> dict:
         """
@@ -479,7 +669,7 @@ class GeminiTermExtractor:
                 "english": "",
                 "chinese": "",
                 "indonesian": "",
-                "detected_language": "auto"  # 添加默认值
+                "detected_language": "auto"  # 会在主函数中被实际检测结果替换
             }
 
             for line in lines:
@@ -487,18 +677,18 @@ class GeminiTermExtractor:
                 if not line:
                     continue
 
-                # 只解析翻译结果
-                if line.startswith('- English translation:'):
-                    translations["english"] = line.replace('- English translation:', '').strip()
-                elif line.startswith('- Chinese translation:'):
-                    translations["chinese"] = line.replace('- Chinese translation:', '').strip()
-                elif line.startswith('- Indonesian translation:'):
-                    translations["indonesian"] = line.replace('- Indonesian translation:', '').strip()
+                # 优化解析逻辑，支持更多格式
+                if '- English translation:' in line or 'English translation:' in line:
+                    translations["english"] = re.sub(r'[-\s]*English translation:\s*', '', line).strip()
+                elif '- Chinese translation:' in line or 'Chinese translation:' in line:
+                    translations["chinese"] = re.sub(r'[-\s]*Chinese translation:\s*', '', line).strip()
+                elif '- Indonesian translation:' in line or 'Indonesian translation:' in line:
+                    translations["indonesian"] = re.sub(r'[-\s]*Indonesian translation:\s*', '', line).strip()
 
             # 验证结果完整性
-            if not all(translations.values()):
+            if not all([translations["english"], translations["chinese"], translations["indonesian"]]):
                 logger.warning("Some translations are missing in the response")
-                missing_fields = [field for field, value in translations.items() if not value]
+                missing_fields = [field for field, value in translations.items() if not value and field != "detected_language"]
                 logger.warning(f"Missing translations for: {missing_fields}")
 
             return translations
@@ -509,7 +699,7 @@ class GeminiTermExtractor:
                 "english": "",
                 "chinese": "",
                 "indonesian": "",
-                "detected_language": "auto"  # 确保错误情况下也有这个字段
+                "detected_language": "auto"
             }
 
     def _is_valid_input(self, text: str) -> bool:
@@ -533,6 +723,7 @@ class GeminiTermExtractor:
         valid_char_pattern = r'[a-zA-Z0-9\u4e00-\u9fff\u0080-\u024F\u0600-\u06FF\u0900-\u097F]'
         return bool(re.search(valid_char_pattern, text))
 
+# 翻译文本到所有支持的语言 主要用在翻译术语表
     async def translate_text_with_language_detection(self, text: str) -> dict:
         """
         便捷方法：翻译文本到所有支持的语言

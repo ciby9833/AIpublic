@@ -333,10 +333,10 @@ def get_available_translators():
     }
 
 # 添加文件大小限制常量
-MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB in bytes
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB in bytes
 
 # 设置超时时间
-TIMEOUT = 300.0  # 300秒
+TIMEOUT = 480.0  # 480秒
 
 @app.post("/api/translate")
 async def translate_document(
@@ -997,6 +997,7 @@ async def translate_multilingual_text(text: str = Form(...)):
             }
         }
 
+# 取消任务 经纬度计算前端专用 
 @app.post("/api/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str, db: Session = Depends(get_db)):
     """取消任务"""

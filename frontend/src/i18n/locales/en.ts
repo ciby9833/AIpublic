@@ -1,6 +1,6 @@
 export default {
   translation: {
-    title: 'Cargo Translation Tool',
+    title: 'Cargo Tool',
     useGlossary: 'Use Glossary',
     sourceLanguage: 'Source Language',
     targetLanguage: 'Target Language',

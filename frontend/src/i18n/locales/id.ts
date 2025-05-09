@@ -1,6 +1,6 @@
 export default {
   translation: {
-    title: 'Cargo Alat Terjemahan',
+    title: 'Cargo Tool',
     useGlossary: 'Gunakan Tabel Istilah',
     sourceLanguage: 'Bahasa Sumber',
     targetLanguage: 'Bahasa Tujuan',

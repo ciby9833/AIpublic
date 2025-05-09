@@ -5,6 +5,7 @@
   display: flex;
   flex-direction: row;
   margin: 0;
+  width: 100%;
 }
 
 .paper-analyzer-sider {
@@ -14,6 +15,7 @@
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
+  flex-shrink: 0;
 }
 
 .paper-analyzer-sider.ant-layout-sider-collapsed {
@@ -30,6 +32,7 @@
   display: flex;
   flex-direction: column;
   margin: 0;
+  min-width: 0;
 }
 
 .upload-section {
@@ -122,10 +125,9 @@
 .translated-content {
   flex: 1;
   padding: 16px 24px;
-  overflow: auto;
-  background: #fff;
-  line-height: 1.6;
-  font-size: 14px;
+  overflow: auto !important;
+  display: flex;
+  flex-direction: column;
 }
 
 .translated-content {
@@ -436,7 +438,7 @@
   }
 
   .paper-analyzer-content {
-    margin-bottom: 60vh;
+    height: 40vh !important;
   }
 
   .document-header {
@@ -678,4 +680,206 @@
   .download-button {
     padding: 2px 4px;
   }
+}
+
+/* 添加行号容器样式 */
+.line-numbers {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  counter-reset: line;
+}
+
+.line-container {
+  display: flex;
+  padding: 2px 0;
+  position: relative;
+  min-height: 24px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.line-number {
+  display: inline-block;
+  width: 40px;
+  padding-right: 12px;
+  text-align: right;
+  color: #999;
+  user-select: none;
+  position: sticky;
+  left: 0;
+  background: #f8f8f8;
+  border-right: 1px solid #eee;
+  margin-right: 12px;
+}
+
+.line-content {
+  flex: 1;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  padding-right: 8px;
+  font-size: 14px !important;
+  line-height: 1.4 !important; 
+  max-width: 100%;
+  overflow-wrap: break-word !important;
+  text-overflow: ellipsis;
+}
+
+/* 优化行号显示 */
+.original-content .line-number,
+.translated-content .line-number {
+  font-size: 12px;
+  color: #666;
+  background: #f5f5f5;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-right: 8px;
+}
+
+/* 添加行号悬停效果 */
+.line-container:hover {
+  background-color: #f5f5f5;
+}
+
+.line-container:hover .line-number {
+  background-color: #e6f7ff;
+  color: #1890ff;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .line-number {
+    width: 30px;
+    padding-right: 8px;
+    font-size: 11px;
+  }
+  
+  .line-content {
+    font-size: 12px;
+  }
+}
+
+/* 添加分析状态样式 */
+.input-area.analyzing {
+  border-color: #1890ff;
+  background-color: #f0f7ff;
+  position: relative;
+}
+
+.input-area.analyzing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.6);
+  z-index: 1;
+}
+
+.input-area.analyzing .ant-upload,
+.input-area.analyzing .ant-btn {
+  position: relative;
+  z-index: 2;
+}
+
+/* 优化分析中的消息样式 */
+.analyzing-message {
+  background-color: #f0f7ff;
+  border: 1px solid #91d5ff;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analyzing-message .anticon {
+  color: #1890ff;
+  font-size: 16px;
+}
+
+/* 优化按钮禁用状态 */
+.ant-btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* 优化上传按钮样式 */
+.ant-upload-disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* 优化分析中的文本区域 */
+.input-area.analyzing .ant-input {
+  background-color: #f0f7ff;
+  cursor: not-allowed;
+}
+
+/* 添加分析中的动画效果 */
+@keyframes analyzing-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(24, 144, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0);
+  }
+}
+
+.input-area.analyzing {
+  animation: analyzing-pulse 2s infinite;
+}
+
+/* Fix virtualized container styling */
+.ReactVirtualized__List {
+  overflow-y: auto !important;
+  width: 100% !important;
+  min-height: 200px !important;
+  max-height: 100% !important;
+}
+
+/* Improve rendering performance */
+.ReactVirtualized__Grid__innerScrollContainer {
+  will-change: transform;
+}
+
+/* Fix empty states */
+.empty-document, 
+.empty-translation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.empty-document p,
+.empty-translation p {
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+/* Add this new style for the content wrapper */
+.content-wrapper {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  background-color: #fafafa;
+}
+
+/* Optimize line display */
+.line-container {
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.line-container:last-child {
+  border-bottom: none;
 }

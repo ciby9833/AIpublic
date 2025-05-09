@@ -19,45 +19,71 @@ class PaperAnalyzerService:
         self.db = db
         self.ai_manager = AIManager()
         self.paper_processor = PaperProcessor()
-        self.rag_retriever = RAGRetriever()
+        self.rag_retriever = RAGRetriever(db)
         self.translator = Translator()
 
     async def analyze_paper(self, file_content: bytes, filename: str):
-        """分析论文文件"""
+        """分析文档文件"""
         try:
-            # 处理论文内容
-            processed_content = await self.paper_processor.process(file_content, filename)
+            # 1. 处理文档内容
+            processed_result = await self.paper_processor.process(file_content, filename)
             
-            # 生成唯一的paper_id
+            # 2. 生成唯一的paper_id
             paper_id = str(uuid.uuid4())
             
-            # 构建向量索引，传入paper_id
-            await self.rag_retriever.build_index(processed_content, paper_id)
-            
-            # 存储到数据库
+            # 3. 先保存到数据库，确保记录存在
             paper_analysis = PaperAnalysis(
                 paper_id=uuid.UUID(paper_id),
                 filename=filename,
-                content=processed_content
+                content=processed_result["content"],
+                line_mapping=processed_result["line_mapping"],
+                total_lines=processed_result["total_lines"],
+                is_scanned=any(line.get("is_scanned", False) 
+                              for line in processed_result["line_mapping"].values()),
+                # 确保这些字段初始化为空
+                documents=None,
+                embeddings=None,
+                index_built=False
             )
             self.db.add(paper_analysis)
             self.db.commit()
             
+            # 4. 构建向量索引
+            try:
+                await self.rag_retriever.build_index(
+                    processed_result["content"], 
+                    paper_id,
+                    processed_result["line_mapping"],
+                    self.db  # 显式传递db连接
+                )
+                # 确认索引构建完成
+                paper_analysis.index_built = True
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                print(f"Index building error: {str(e)}")
+                # 不中断流程，允许用户先查看文档内容
+            
+            # 5. 返回完整的数据
             return {
                 "status": "success",
-                "message": "论文分析完成",
+                "message": "文档分析完成",
                 "paper_id": paper_id,
-                "content": processed_content
+                "content": processed_result["content"],
+                "line_mapping": processed_result["line_mapping"] or {},
+                "total_lines": processed_result["total_lines"],
+                "is_scanned": paper_analysis.is_scanned
             }
         except Exception as e:
             self.db.rollback()
+            print(f"Paper analysis error: {str(e)}")
             return {
                 "status": "error",
                 "message": str(e)
             }
 
     async def get_paper_content(self, paper_id: str) -> str:
-        """获取论文内容"""
+        """获取文档内容"""
         try:
             paper = self.db.query(PaperAnalysis).filter(
                 PaperAnalysis.paper_id == uuid.UUID(paper_id)
@@ -71,25 +97,39 @@ class PaperAnalyzerService:
             raise Exception(f"Failed to get paper content: {str(e)}")
 
     async def ask_question(self, question: str, paper_id: str):
-        """向论文提问"""
+        """向文档提问"""
         try:
             # 验证paper_id
             if paper_id == "current_paper_id":
-                # 获取最新的paper_id
                 latest_paper = self.db.query(PaperAnalysis).order_by(
                     PaperAnalysis.created_at.desc()
                 ).first()
                 if not latest_paper:
                     return {
                         "status": "error",
-                        "message": "没有找到可用的论文"
+                        "message": "没有找到可用的文档"
                     }
                 paper_id = str(latest_paper.paper_id)
 
             # 获取相关上下文
             try:
+                # 首先检查数据库中是否存在这个paper_id
+                paper = self.db.query(PaperAnalysis).filter(
+                    PaperAnalysis.paper_id == uuid.UUID(paper_id)
+                ).first()
+                
+                if not paper:
+                    return {
+                        "status": "error",
+                        "message": f"Paper ID {paper_id} not found in database"
+                    }
+                    
                 context = await self.rag_retriever.get_relevant_context(question, paper_id)
             except Exception as e:
+                # 记录详细错误信息
+                import traceback
+                print(f"Context retrieval error for paper {paper_id}: {str(e)}")
+                print(traceback.format_exc())
                 return {
                     "status": "error",
                     "message": f"获取上下文失败: {str(e)}"
@@ -101,15 +141,31 @@ class PaperAnalyzerService:
             # 存储问答记录
             paper_question = PaperQuestion(
                 question=question,
-                answer=response,
-                paper_ids=[uuid.UUID(paper_id)]  # 使用 paper_ids 数组
+                answer=response["answer"],  # 只存储答案文本
+                paper_ids=[uuid.UUID(paper_id)]
             )
             self.db.add(paper_question)
             self.db.commit()
             
+            # 确保返回的数据都是可序列化的
             return {
                 "status": "success",
-                "response": response
+                "response": {
+                    "answer": str(response["answer"]),
+                    "sources": [
+                        {
+                            "line_number": int(source["line_number"]),
+                            "content": str(source["content"]),
+                            "page": int(source["page"]),
+                            "start_pos": int(source["start_pos"]),
+                            "end_pos": int(source["end_pos"]),
+                            "is_scanned": bool(source["is_scanned"]),
+                            "similarity": float(source["similarity"])
+                        }
+                        for source in response["sources"]
+                    ],
+                    "confidence": float(response["confidence"])
+                }
             }
         except Exception as e:
             self.db.rollback()
@@ -134,9 +190,9 @@ class PaperAnalyzerService:
             raise Exception(f"Failed to get question history: {str(e)}")
 
     async def translate_paper(self, paper_id: str, target_lang: str):
-        """翻译论文内容"""
+        """翻译文档内容"""
         try:
-            # 获取论文内容
+            # 获取文档内容
             paper = self.db.query(PaperAnalysis).filter(
                 PaperAnalysis.paper_id == uuid.UUID(paper_id)
             ).first()
@@ -179,7 +235,7 @@ class PaperAnalyzerService:
     async def download_translation(self, paper_id: str, target_lang: str, format: str) -> bytes:
         """下载翻译结果"""
         try:
-            # 获取论文内容
+            # 获取文档内容
             paper = self.db.query(PaperAnalysis).filter(
                 PaperAnalysis.paper_id == uuid.UUID(paper_id)
             ).first()

@@ -1,3 +1,4 @@
+# backend/services/local_glossary_manager.py    本地术语表管理器
 from typing import Optional
 from datetime import datetime
 import logging
