@@ -61,6 +61,10 @@ const PaperAnalyzer: React.FC = () => {
   const [syncScrolling, setSyncScrolling] = useState<boolean>(true);
   const originalContentRef = useRef<HTMLDivElement>(null);
   const translatedContentRef = useRef<HTMLDivElement>(null);
+  const [siderWidth, setSiderWidth] = useState(400);
+  const [isResizing, setIsResizing] = useState(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
 
   // 处理文件拖放
   const handleDrop = (e: React.DragEvent) => {
@@ -283,13 +287,49 @@ const PaperAnalyzer: React.FC = () => {
     originalElement.scrollTop = scrollPercentage * originalScrollable;
   }, [syncScrolling, documentContent]);
 
+  // Fix the resizing handlers with proper TypeScript typing
+  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsResizing(true);
+    startXRef.current = e.clientX;
+    startWidthRef.current = siderWidth;
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    const delta = e.clientX - startXRef.current;
+    const newWidth = Math.max(300, Math.min(800, startWidthRef.current + delta));
+    setSiderWidth(newWidth);
+  }, [isResizing]);
+
+  const handleResizeEnd = useCallback(() => {
+    setIsResizing(false);
+    document.removeEventListener('mousemove', handleResizeMove);
+    document.removeEventListener('mouseup', handleResizeEnd);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, [handleResizeMove]);
+
+  // Clean up event listeners with proper dependencies
+  useEffect(() => {
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+    };
+  }, [handleResizeMove, handleResizeEnd]);
+
   return (
     <Layout className="paper-analyzer-layout">
       <Sider 
-        width={400}
+        width={siderWidth}
         collapsible={false}
         collapsed={collapsed}
         className="paper-analyzer-sider"
+        style={{ transition: isResizing ? 'none' : '' }}
       >
         <div className="chat-container">
           <div className="chat-header">
@@ -371,6 +411,14 @@ const PaperAnalyzer: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+        
+        {/* Add resize handle */}
+        <div 
+          className="resize-handle"
+          onMouseDown={handleResizeStart}
+        >
+          <div className="handle-bar"></div>
         </div>
       </Sider>
 

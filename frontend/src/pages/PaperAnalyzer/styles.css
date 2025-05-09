@@ -16,6 +16,7 @@
   flex-direction: column;
   transition: width 0.3s ease;
   flex-shrink: 0;
+  position: relative;
 }
 
 .paper-analyzer-sider.ant-layout-sider-collapsed {
@@ -33,6 +34,7 @@
   flex-direction: column;
   margin: 0;
   min-width: 0;
+  transition: width 0.2s ease;
 }
 
 .upload-section {
@@ -882,4 +884,69 @@
 
 .line-container:last-child {
   border-bottom: none;
+}
+
+/* Resize handle styles */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: -5px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resize-handle:hover .handle-bar {
+  background-color: #1890ff;
+  width: 4px;
+}
+
+.handle-bar {
+  width: 3px;
+  height: 50px;
+  background-color: #d9d9d9;
+  border-radius: 2px;
+  transition: background-color 0.2s, width 0.2s;
+}
+
+/* Make sure the sider has relative positioning for the handle */
+.paper-analyzer-sider {
+  position: relative;
+}
+
+/* Completely disable transitions during resize for smoother experience */
+.paper-analyzer-sider {
+  transition: width 0.2s ease;
+}
+
+.paper-analyzer-sider[style*="transition: none"] {
+  transition: none !important;
+}
+
+.paper-analyzer-sider[style*="transition: none"] + .paper-analyzer-content {
+  transition: none !important;
+}
+
+/* Update the header-actions styles to better align items */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Add style for the switch to align it properly */
+.header-actions .ant-switch {
+  margin-right: 4px;
+}
+
+.download-button {
+  padding: 2px 4px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
