@@ -1,4 +1,4 @@
-# backend/auth/user_router.py
+# backend/auth/user_router.py  用户管理
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional

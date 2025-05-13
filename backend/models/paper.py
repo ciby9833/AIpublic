@@ -35,6 +35,14 @@ class PaperAnalysis(Base):
     documents = Column(JSONB)  # 存储分块后的文档内容
     index_built = Column(Boolean, default=False)  # 标记是否已构建索引
 
+    # 新增字段：文档摘要
+    summary = Column(Text)  # 文档摘要，用于会话显示
+    # 文档标签，便于分类和搜索
+    tags = Column(ARRAY(String), server_default='{}')
+
+    # 添加结构化数据字段
+    structured_data = Column(JSONB)  # 用于存储Excel等结构化文件的JSON数据 513待更新
+
 class PaperQuestion(Base):
     __tablename__ = "paper_questions"
 

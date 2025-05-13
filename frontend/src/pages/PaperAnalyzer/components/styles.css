@@ -205,10 +205,10 @@
   justify-content: center;
   border-radius: 4px;
   transition: all 0.3s ease;
-  opacity: 0;
+  opacity: 0.7; /* 默认轻微可见 */
 }
 
-.message-bubble:hover .copy-button {
+.chat-message:hover .copy-button {
   opacity: 1;
 }
 
@@ -287,4 +287,316 @@
   .message-content {
     font-size: 12px;
   }
+}
+
+/* Enhance existing styles for better chat message rendering */
+.copy-button-container {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.rich-content-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.content-item {
+  margin-bottom: 8px;
+}
+
+.mermaid-container {
+  margin: 16px 0;
+  padding: 12px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.mermaid {
+  display: block;
+  width: 100%;
+  overflow: auto;
+  min-height: 100px;
+  text-align: center;
+  padding: 10px;
+}
+
+.mermaid svg {
+  max-width: 100%;
+  margin: 0 auto;
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+
+.mermaid svg.expanded {
+  transform: scale(1.5);
+  transform-origin: center center;
+}
+
+.mermaid-fallback {
+  margin-top: 10px;
+  background-color: #eee;
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.mermaid-fallback summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #666;
+  padding: 4px;
+}
+
+.mermaid-fallback pre {
+  background-color: #fff;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 200px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  color: #333;
+}
+
+.mermaid-error {
+  text-align: left;
+  color: #f5222d;
+  font-size: 13px;
+  padding: 10px;
+  border: 1px solid #ffccc7;
+  border-radius: 4px;
+  background-color: #fff2f0;
+}
+
+.mermaid-error p {
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.mermaid-error pre {
+  background-color: #fff;
+  padding: 8px;
+  border-radius: 4px;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  border: 1px solid #ddd;
+}
+
+.loading-dots {
+  display: inline-block;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+.sources-header {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #666;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sources-header:hover {
+  color: #1890ff;
+}
+
+.toggle-icon {
+  font-size: 10px;
+}
+
+.sources-list {
+  margin: 8px 0 0 0;
+  padding-left: 16px;
+  border-left: 2px solid #f0f0f0;
+}
+
+.source-item {
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+
+.source-document {
+  font-weight: 500;
+  margin-right: 4px;
+  color: #1890ff;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.source-content {
+  color: #333;
+  display: block;
+  font-size: 13px;
+}
+
+.chat-message-container {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.chat-message {
+  display: flex;
+  padding: 10px 16px;
+  width: 100%;
+}
+
+.user-message {
+  background-color: rgba(247, 247, 248, 0.9);
+}
+
+.message-avatar {
+  margin-right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: #f0f0f0;
+}
+
+.user-message .message-avatar {
+  background-color: #1890ff;
+  color: white;
+}
+
+.message-content {
+  flex: 1;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.message-text {
+  padding: 4px 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.code-block-container {
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #eee;
+  margin: 8px 0;
+}
+
+.code-block-header {
+  background-color: #f5f5f5;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #666;
+  border-bottom: 1px solid #eee;
+}
+
+.code-language {
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.table-container {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.message-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+.message-table th,
+.message-table td {
+  border: 1px solid #eee;
+  padding: 8px;
+  text-align: left;
+}
+
+.message-table th {
+  background-color: #f5f5f5;
+  font-weight: 500;
+}
+
+.message-table tr:nth-child(even) {
+  background-color: #fafafa;
+}
+
+/* Math formula styling */
+.math {
+  font-family: 'KaTeX_Math', serif;
+  font-size: 1.1em;
+  color: #333;
+}
+
+/* Add this to your CSS */
+.mermaid-tips {
+  margin-top: 10px;
+  padding: 8px;
+  background-color: #f8f8f8;
+  border-left: 3px solid #faad14;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #555;
+}
+
+.mermaid-tips ul {
+  padding-left: 20px;
+  margin: 5px 0 0 0;
+}
+
+.mermaid-tips li {
+  margin-bottom: 3px;
+}
+
+/* 添加 loading 状态样式 */
+.mermaid[data-loading="true"]::before {
+  content: '正在渲染 Mermaid 图表...';
+  font-size: 0.9rem;
+  color: #888;
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* 优化错误显示样式 */
+.mermaid-error pre {
+  background: #f6f6f6;
+  padding: 8px;
+  overflow-x: auto;
+  font-family: monospace;
+  max-height: 200px;
+  border-radius: 4px;
+}
+
+.mermaid-error {
+  color: #d32f2f;
+  padding: 8px;
+  border: 1px solid #ffccbc;
+  border-radius: 4px;
+  background-color: #ffebee;
+  margin: 8px 0;
+}
+
+/* 对扩展状态的图表使用data-attributes */
+.mermaid svg[data-expanded="true"] {
+  margin: 10px 0;
+  transform: scale(1.5);
+  transform-origin: left top;
 }

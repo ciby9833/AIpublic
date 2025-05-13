@@ -6,7 +6,7 @@ import httpx
 import os
 import asyncio
 from dotenv import load_dotenv
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from abc import ABC, abstractmethod
 from enum import Enum
 import logging
@@ -23,7 +23,7 @@ from fastapi import Depends
 from database import get_db
 from sqlalchemy.sql import text
 from services.local_glossary_manager import LocalGlossaryManager
-from auth.oauth import router as auth_router
+from auth.oauth import router as auth_router, get_current_user
 from auth.user_router import router as user_router
 from services.distance_calculator import DistanceCalculator
 from io import BytesIO
@@ -32,6 +32,10 @@ import base64
 import urllib.parse
 from services.paper_analyzer import PaperAnalyzerService
 import uuid
+from fastapi import Header
+from pydantic import BaseModel
+from auth.models import ChatSession, ChatMessage, User, SessionDocument
+from models.paper import PaperAnalysis  # 使用正确的类名
 
 # 加载环境变量
 load_dotenv()
@@ -311,6 +315,36 @@ app.add_middleware(
 # 注册路由
 app.include_router(auth_router)  # 先注册 auth 路由
 app.include_router(user_router, prefix="/api")  # 再注册用户路由
+
+# 添加一个辅助函数来从当前请求中获取用户ID - 必须在使用前定义
+async def get_current_user_id(
+    authorization: Optional[str] = Header(None, description="Bearer token"),
+    db: Session = Depends(get_db)
+):
+    """从请求头中提取用户ID"""
+    if not authorization:
+        return None
+        
+    try:
+        # 提取 token
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "INVALID_TOKEN_FORMAT", "message": "Token must be Bearer"}
+            )
+        
+        token = authorization.replace("Bearer ", "")
+        
+        # 验证用户
+        user = await get_current_user(db=db, access_token=token)
+        return str(user.id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTHENTICATION_ERROR", "message": str(e)}
+        )
 
 @app.get("/api/translators")
 def get_available_translators():
@@ -1086,9 +1120,35 @@ def get_paper_analyzer(db: Session = Depends(get_db)):
 @app.post("/api/paper/analyze")
 async def analyze_paper(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    session_id: Optional[str] = Form(None),  # Add optional session_id parameter
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_current_user_id)  # Make user_id optional
 ):
     try:
+        # 先检查会话文档数量限制（如果提供了会话ID）
+        if session_id and user_id:
+            # 验证会话存在且属于该用户
+            session = db.query(ChatSession).filter(
+                ChatSession.id == uuid.UUID(session_id),
+                ChatSession.user_id == uuid.UUID(user_id)
+            ).first()
+            
+            if session:
+                # 检查会话中的文档数量
+                doc_count = db.query(SessionDocument).filter(
+                    SessionDocument.session_id == uuid.UUID(session_id)
+                ).count()
+                
+                # 如果已经达到最大限制，拒绝上传
+                if doc_count >= 10:  # MAX_DOCUMENTS_PER_SESSION
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": "SESSION_DOCUMENT_LIMIT_REACHED",
+                            "message": "一个会话最多支持10个文档，请创建新会话"
+                        }
+                    )
+
         # 验证文件类型
         allowed_extensions = ('.pdf', '.docx', '.doc', '.pptx', '.ppt', 
                             '.xlsx', '.xls', '.txt', '.md')
@@ -1104,7 +1164,22 @@ async def analyze_paper(
         content = await file.read()
         analyzer = get_paper_analyzer(db)
         result = await analyzer.analyze_paper(content, file.filename)
+        
+        # 如果上传成功且提供了会话ID，自动添加到会话
+        if session_id and user_id and result.get("status") == "success" and result.get("paper_id"):
+            try:
+                paper_id = result["paper_id"]
+                await analyzer.add_document_to_session(session_id, paper_id, user_id)
+                result["added_to_session"] = True
+            except Exception as session_error:
+                # 只记录错误，不影响文件分析返回
+                print(f"Error adding document to session: {str(session_error)}")
+                result["added_to_session"] = False
+                result["session_error"] = str(session_error)
+        
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -1214,5 +1289,527 @@ async def download_translation(
         raise HTTPException(
             status_code=500,
             detail={"code": "DOWNLOAD_ERROR", "message": str(e)}
+        )
+
+# Define request body model
+class MessageRequest(BaseModel):
+    message: str
+    
+# Update the send_chat_message endpoint
+@app.post("/api/chat-sessions/{session_id}/messages")
+async def send_chat_message(
+    session_id: str,
+    request: MessageRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证用户是否有权限访问此会话
+        session = db.query(ChatSession).filter(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == uuid.UUID(user_id)
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "SESSION_NOT_FOUND", "message": "Chat session not found"}
+            )
+            
+        analyzer = get_paper_analyzer(db)
+        
+        # 发送消息并获取带有富文本内容的响应
+        result = await analyzer.send_message(
+            session_id=session_id,
+            message=request.message,
+            user_id=user_id
+        )
+        
+        # 重要: 返回完整的结果，包含user_message和ai_message两个字段
+        # 这样前端可以访问 result.user_message.id 和 result.ai_message
+        return result
+        
+    except Exception as e:
+        logger.error(f"Message send error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "MESSAGE_SEND_ERROR", "message": str(e)}
+        )
+
+class SessionRequest(BaseModel):
+    title: str = None
+    paper_ids: List[str] = None  # 支持多文档
+    is_ai_only: bool = False  # 新增无文档AI聊天支持
+
+class DocumentRequest(BaseModel):
+    paper_id: str
+
+# 1. 会话管理 API
+
+# 获取所有会话
+@app.get("/api/chat-sessions")
+async def get_all_chat_sessions(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 获取用户的所有活跃会话
+        sessions = db.query(ChatSession).filter(
+            ChatSession.user_id == uuid.UUID(user_id),
+            ChatSession.is_active == True
+        ).order_by(ChatSession.updated_at.desc()).all()
+        
+        result = []
+        for session in sessions:
+            # 获取消息数量
+            message_count = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session.id
+            ).count()
+            
+            # 获取最后一条消息
+            last_message = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session.id
+            ).order_by(ChatMessage.created_at.desc()).first()
+            
+            # 获取关联的文档
+            session_docs = db.query(SessionDocument).filter(
+                SessionDocument.session_id == session.id
+            ).all()
+            
+            documents = []
+            for doc in session_docs:
+                documents.append({
+                    "id": str(doc.id),
+                    "paper_id": str(doc.paper_id),
+                    "filename": doc.filename
+                })
+            
+            result.append({
+                "id": str(session.id),
+                "title": session.title,
+                "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(),
+                "session_type": session.session_type,
+                "is_ai_only": session.is_ai_only,
+                "message_count": message_count,
+                "last_message": last_message.content if last_message else "",
+                "documents": documents
+            })
+        
+        return result
+    except Exception as e:
+        import traceback
+        print(f"Sessions fetch error: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SESSIONS_FETCH_ERROR", "message": str(e)}
+        )
+
+# 创建新会话
+@app.post("/api/chat-sessions")
+async def create_chat_session(
+    request: SessionRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 获取分析器实例
+        analyzer = get_paper_analyzer(db)
+        
+        # 支持AI-only对话模式
+        if request.is_ai_only:
+            # 创建不绑定文档的AI聊天会话
+            result = await analyzer.create_ai_chat_session(
+                user_id=user_id,
+                title=request.title or "AI 对话"
+            )
+        elif request.paper_ids and len(request.paper_ids) > 0:
+            # 创建绑定多个文档的会话
+            # 直接使用 create_chat_session 方法，不要调用不存在的方法
+            result = await analyzer.create_chat_session(
+                user_id=user_id,
+                title=request.title,
+                paper_ids=request.paper_ids,
+                session_type="document"
+            )
+        else:
+            # 错误检查
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "code": "INVALID_REQUEST", 
+                    "message": "必须指定至少一个文档ID，或启用AI-only模式"
+                }
+            )
+            
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SESSION_CREATION_ERROR", "message": str(e)}
+        )
+
+# 获取会话详情
+@app.get("/api/chat-sessions/{session_id}")
+async def get_chat_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证用户是否有权限访问此会话
+        session = db.query(ChatSession).filter(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == uuid.UUID(user_id)
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "SESSION_NOT_FOUND", "message": "Chat session not found"}
+            )
+            
+        # 获取消息计数
+        message_count = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session.id
+        ).count()
+        
+        # 获取最后一条消息
+        last_message = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session.id
+        ).order_by(ChatMessage.created_at.desc()).first()
+        
+        # 获取关联的文档
+        paper_ids = session.paper_ids or []
+        
+        return {
+            "id": str(session.id),
+            "title": session.title,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "paper_ids": paper_ids,
+            "is_ai_only": session.is_ai_only,
+            "message_count": message_count,
+            "last_message": last_message.content if last_message else ""
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SESSION_FETCH_ERROR", "message": str(e)}
+        )
+
+# 2. 消息管理API
+
+# 获取会话消息
+@app.get("/api/chat-sessions/{session_id}/messages")
+async def get_chat_messages(
+    session_id: str,
+    limit: int = Query(20, description="最大消息数量, 默认20"),
+    before_id: Optional[str] = Query(None, description="获取此ID之前的消息"),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证会话是否存在且属于该用户
+        try:
+            session = db.query(ChatSession).filter(
+                ChatSession.id == uuid.UUID(session_id),
+                ChatSession.user_id == uuid.UUID(user_id)
+            ).first()
+            
+            if not session:
+                return {
+                    "messages": [],
+                    "has_more": False
+                }
+        except Exception as e:
+            print(f"Error verifying session: {str(e)}")
+            return {
+                "messages": [],
+                "has_more": False
+            }
+            
+        # 获取会话消息
+        analyzer = get_paper_analyzer(db)
+        try:
+            messages = await analyzer.get_chat_history(session_id, limit=limit, before_id=before_id)
+            
+            # 确保响应包含所需的字段
+            if isinstance(messages, dict) and "messages" in messages:
+                return messages
+            else:
+                # 如果返回的不是预期的格式，进行转换
+                return {
+                    "messages": messages if isinstance(messages, list) else [],
+                    "has_more": False
+                }
+                
+        except Exception as e:
+            print(f"Error in analyzer.get_chat_history: {str(e)}")
+            return {
+                "messages": [],
+                "has_more": False
+            }
+            
+    except Exception as e:
+        print(f"Unhandled error in get_chat_messages: {str(e)}")
+        # 即使有错误也返回空消息列表，避免500错误
+        return {
+            "messages": [],
+            "has_more": False
+        }
+
+
+# 3. 文档管理API
+
+# 添加文档到会话
+@app.post("/api/chat-sessions/{session_id}/documents")
+async def add_document_to_session(
+    session_id: str,
+    request: DocumentRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证用户是否有权限访问此会话
+        session = db.query(ChatSession).filter(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == uuid.UUID(user_id)
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "SESSION_NOT_FOUND", "message": "Chat session not found"}
+            )
+        
+        # 检查会话中的文档数量是否超出限制
+        doc_count = db.query(SessionDocument).filter(
+            SessionDocument.session_id == uuid.UUID(session_id)
+        ).count()
+        
+        if doc_count >= 10:  # MAX_DOCUMENTS_PER_SESSION
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "SESSION_DOCUMENT_LIMIT_REACHED", 
+                    "message": "一个会话最多支持10个文档，请创建新会话"
+                }
+            )
+        
+        # 获取分析器实例
+        analyzer = get_paper_analyzer(db)
+        
+        # 添加文档到会话
+        result = await analyzer.add_document_to_session(
+            session_id=session_id,
+            paper_id=request.paper_id,
+            user_id=user_id
+        )
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "DOCUMENT_ADD_ERROR", "message": str(e)}
+        )
+
+# 获取会话的文档
+@app.get("/api/chat-sessions/{session_id}/documents")
+async def get_session_documents(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证用户是否有权限访问此会话
+        session = db.query(ChatSession).filter(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == uuid.UUID(user_id)
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "SESSION_NOT_FOUND", "message": "Chat session not found"}
+            )
+        
+        # 获取分析器实例
+        analyzer = get_paper_analyzer(db)
+        
+        # 使用PaperAnalyzerService中的get_session_documents方法获取文档
+        documents = await analyzer.get_session_documents(session_id, user_id)
+        
+        return {"documents": documents}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "DOCUMENTS_FETCH_ERROR", "message": str(e)}
+        )
+
+# 移除会话中的文档
+@app.delete("/api/chat-sessions/{session_id}/documents/{document_id}")
+async def remove_document_from_session(
+    session_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证用户是否有权限访问此会话
+        session = db.query(ChatSession).filter(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == uuid.UUID(user_id)
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "SESSION_NOT_FOUND", "message": "Chat session not found"}
+            )
+        
+        # 获取分析器实例
+        analyzer = get_paper_analyzer(db)
+        
+        # 从会话中移除文档
+        result = await analyzer.remove_document_from_session(
+            session_id=session_id,
+            paper_id=document_id,
+            user_id=user_id
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "DOCUMENT_REMOVE_ERROR", "message": str(e)}
+        )
+
+# 4. 保留旧版API路径的兼容支持
+@app.post("/api/paper/{paper_id}/chat-sessions")
+async def create_chat_session_legacy(
+    paper_id: str,
+    request: SessionRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    # 使用新的请求格式
+    new_request = SessionRequest(
+        title=request.title,
+        paper_ids=[paper_id],
+        is_ai_only=False
+    )
+    # 调用新API
+    return await create_chat_session(new_request, db, user_id)
+
+@app.get("/api/paper/{paper_id}/chat-sessions")
+async def get_chat_sessions_legacy(
+    paper_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 获取用户在特定文档下的所有会话
+        sessions = db.query(ChatSession).filter(
+            ChatSession.user_id == uuid.UUID(user_id),
+            ChatSession.is_active == True,
+            ChatSession.paper_ids.contains([paper_id])
+        ).order_by(ChatSession.updated_at.desc()).all()
+        
+        result = []
+        for session in sessions:
+            # 获取消息计数
+            message_count = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session.id
+            ).count()
+            
+            # 获取最后一条消息
+            last_message = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session.id
+            ).order_by(ChatMessage.created_at.desc()).first()
+            
+            result.append({
+                "id": str(session.id),
+                "title": session.title,
+                "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(),
+                "paper_id": paper_id,  # 兼容旧版API
+                "message_count": message_count,
+                "last_message": last_message.content if last_message else ""
+            })
+        
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SESSIONS_FETCH_ERROR", "message": str(e)}
+        )
+
+# 请求体模型定义
+class UpdateSessionTitleRequest(BaseModel):
+    title: str
+
+# 删除会话API
+@app.delete("/api/chat-sessions/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 获取分析器实例
+        analyzer = get_paper_analyzer(db)
+        
+        # 调用服务方法
+        result = await analyzer.delete_chat_session(
+            session_id=session_id,
+            user_id=user_id
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SESSION_DELETE_ERROR", "message": str(e)}
+        )
+
+# 更新会话标题API
+@app.patch("/api/chat-sessions/{session_id}/title")
+async def update_chat_session_title(
+    session_id: str,
+    request: UpdateSessionTitleRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        # 验证标题不能为空
+        if not request.title or not request.title.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "INVALID_TITLE", "message": "会话标题不能为空"}
+            )
+            
+        # 获取分析器实例
+        analyzer = get_paper_analyzer(db)
+        
+        # 调用服务方法
+        result = await analyzer.update_chat_session_title(
+            session_id=session_id,
+            user_id=user_id,
+            new_title=request.title.strip()
+        )
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "SESSION_UPDATE_ERROR", "message": str(e)}
         )
 
