@@ -596,7 +596,7 @@ const MobileChat: React.FC = () => {
             {messages.length === 0 && !loading && (
               <div className="x-welcome">
                 <div className="x-welcome-icon"><RobotOutlined /></div>
-                <h3>AI助手</h3>
+                <h3>Cargo AI助手</h3>
                 <p>有任何问题都可以向我提问</p>
               </div>
             )}

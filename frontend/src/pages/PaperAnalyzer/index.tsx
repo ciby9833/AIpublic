@@ -95,6 +95,7 @@ const PaperAnalyzer: React.FC = () => {
     isStreaming: false,
     partialMessage: ''
   });
+  const [isComposing, setIsComposing] = useState(false);
 
   // 检测是否为移动设备
   useEffect(() => {
@@ -199,9 +200,19 @@ const PaperAnalyzer: React.FC = () => {
             await paperAnalyzerApi.addDocumentToSession(sessionId, result.paper_id);
             console.log(`文档已添加到当前会话: ${sessionId}`);
             
-            // Add this line to fetch updated document list after adding document
+            // 确保这里的代码是异步的，并且等待结果
             await fetchSessionDocuments(sessionId);
             
+            // 额外添加一个直接检查而不依赖状态更新的逻辑
+            try {
+              const sessionDocs = await paperAnalyzerApi.getSessionDocuments(sessionId);
+              if (sessionDocs && sessionDocs.documents) {
+                setSessionDocuments(sessionDocs.documents);
+                console.log(`会话文档数量更新: ${sessionDocs.documents.length}`);
+              }
+            } catch (error) {
+              console.error("获取会话文档失败:", error);
+            }
           } catch (error: any) {
             console.error('添加文档到会话失败:', error);
             
@@ -225,6 +236,9 @@ const PaperAnalyzer: React.FC = () => {
               message.error('添加文档到会话失败');
             }
           }
+        } else if (wasAddedToSession) {
+          // 如果文档自动添加到会话，也需要刷新文档列表
+          await fetchSessionDocuments(sessionId);
         }
 
         // 5. 添加分析完成的消息并持久化到后端
@@ -726,20 +740,27 @@ const PaperAnalyzer: React.FC = () => {
     }
   };
 
-  // Add a new function to fetch session documents
+  // 优化 fetchSessionDocuments 函数
   const fetchSessionDocuments = async (sessionId: string) => {
     if (!sessionId) return;
     
     try {
+      console.log(`正在获取会话(${sessionId})的文档...`);
       const result = await paperAnalyzerApi.getSessionDocuments(sessionId);
+      
       if (result && result.documents) {
+        console.log(`会话文档获取成功，数量: ${result.documents.length}`);
         setSessionDocuments(result.documents);
+        return result.documents; // 返回文档列表以便调用者使用
       } else {
+        console.log('会话没有文档或返回格式错误');
         setSessionDocuments([]);
+        return [];
       }
     } catch (error) {
       console.error('加载会话文档失败:', error);
       setSessionDocuments([]);
+      return [];
     }
   };
 
@@ -1294,6 +1315,14 @@ const PaperAnalyzer: React.FC = () => {
                 placeholder={showSessions ? "选择一个会话开始聊天" : analyzing ? "正在分析文档，请稍候..." : "请输入您的问题或拖拽文件到此处"}
                 rows={3}
                 disabled={analyzing || showSessions}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={() => setIsComposing(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !isComposing && !analyzing && !showSessions) {
+                    e.preventDefault();
+                    handleAsk();
+                  }
+                }}
               />
               <div className="input-actions">
                 <div className="left-actions">
@@ -1321,6 +1350,7 @@ const PaperAnalyzer: React.FC = () => {
                           <Button
                             icon={<FileTextOutlined />}
                             onClick={toggleDocumentsList}
+                            data-has-documents={sessionDocuments.length > 0}
                           />
                         </Tooltip>
                       )}
