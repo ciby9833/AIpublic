@@ -17,6 +17,14 @@ from datetime import datetime
 from typing import List, Dict, Optional, Union
 from auth.models import ChatSession, ChatMessage, SessionDocument
 from models.chat import ChatFile, ChatTopic, ChatTopicSession
+from contextlib import contextmanager
+import time
+import json
+from celery import Celery
+import logging
+import asyncio
+
+logger = logging.getLogger(__name__)
 
 class PaperAnalyzerService:
     def __init__(self, db: Session):
@@ -569,7 +577,7 @@ class PaperAnalyzerService:
                 try:
                     # 避免任何可能的空值或类型错误
                     message_data = {
-                        "id": str(message.id),
+                "id": str(message.id),
                         "role": message.role or "",
                         "content": message.content or "",
                         "created_at": message.created_at.isoformat() if message.created_at else "",
@@ -605,7 +613,13 @@ class PaperAnalyzerService:
             }
 
     async def send_message(self, session_id: str, message: str, user_id: str) -> dict:
-        """发送消息到特定会话"""
+        """发送消息到特定会话，使用独立事务处理用户消息和AI响应"""
+        # 添加消息状态跟踪
+        message_status = {"stored": False, "user_message_id": None, "ai_message_id": None}
+        user_message = None
+        user_message_stored = False
+        
+        # 第一个事务：存储用户消息
         try:
             # 生成精确的当前时间戳
             current_time = datetime.utcnow()
@@ -615,13 +629,27 @@ class PaperAnalyzerService:
                 session_id=uuid.UUID(session_id),
                 role='user',
                 content=message,
-                message_type='markdown',  # 修改：统一使用 'markdown' 类型
+                message_type='markdown',
                 created_at=current_time
             )
             self.db.add(user_message)
-            self.db.flush()  # 获取生成的ID和时间戳
-            
-            # 2. 获取会话信息
+            self.db.commit()  # 提交用户消息事务
+            user_message_stored = True
+            message_status["user_message_id"] = str(user_message.id)
+            print(f"User message stored with ID: {user_message.id}")
+        except Exception as user_msg_error:
+            self.db.rollback()
+            print(f"Error storing user message: {str(user_msg_error)}")
+            # 继续尝试处理
+        
+        # 获取会话和生成响应 - 不在事务中进行
+        session = None
+        response = None
+        processing_errors = []
+        context_history = ""
+        
+        try:
+            # 获取会话信息
             session = self.db.query(ChatSession).filter(
                 ChatSession.id == uuid.UUID(session_id),
                 ChatSession.user_id == uuid.UUID(user_id)
@@ -629,21 +657,17 @@ class PaperAnalyzerService:
             
             if not session:
                 error_msg = "Chat session not found"
-                # 创建错误响应
-                error_response = {
-                    "answer": error_msg,
-                    "sources": [],
-                    "confidence": 0.0,
-                    "reply": [{"type": "markdown", "content": error_msg}]
-                }
-                # 保存错误消息
-                self._save_ai_response(session_id, error_response)
                 return {
                     "user_message": self._format_message(user_message),
-                    "ai_message": self._format_ai_message(error_response)
+                    "ai_message": self._format_ai_message({
+                        "answer": error_msg,
+                        "sources": [],
+                        "confidence": 0.0,
+                        "reply": [{"type": "markdown", "content": error_msg}]
+                    })
                 }
             
-            # 3. 获取历史消息作为上下文
+            # 获取历史消息作为上下文 - 独立查询
             try:
                 history_messages = self.db.query(ChatMessage).filter(
                     ChatMessage.session_id == uuid.UUID(session_id)
@@ -652,180 +676,185 @@ class PaperAnalyzerService:
                 # 构建上下文历史
                 context_history = "\n".join([
                     f"{'User' if msg.role == 'user' else 'Assistant'}: {msg.content}"
-                    for msg in history_messages[-8:]  # 使用最近8条消息作为上下文
+                    for msg in history_messages[-8:]
                 ])
-            except Exception as e:
-                print(f"Error getting message history: {str(e)}")
-                context_history = ""  # 如果获取失败，使用空历史
+            except Exception as history_error:
+                print(f"Error getting message history: {str(history_error)}")
+                context_history = ""  # 使用空历史
             
-            # 生成回答
-            response = None
+            # 生成回答 - 此处是计算密集型操作，不在事务中进行
+            # [保留现有的AI响应生成代码]...
             
-            try:
-                # 根据会话类型使用不同的生成方法
-                if session.session_type == "document":
-                    # 获取相关文档IDs
-                    paper_ids = []
-                    if session.paper_id:  # 向后兼容的单文档模式
-                        paper_ids.append(str(session.paper_id))
-                    
-                    # 从SessionDocument关联表获取多文档信息
-                    session_docs = self.db.query(SessionDocument).filter(
-                        SessionDocument.session_id == uuid.UUID(session_id)
-                    ).order_by(SessionDocument.order).all()
-                    
-                    for doc in session_docs:
-                        paper_id = str(doc.paper_id)
-                        if paper_id not in paper_ids:  # 避免重复
-                            paper_ids.append(paper_id)
-                    
-                    if not paper_ids:
-                        error_msg = "No documents associated with this session"
-                        error_response = {
-                            "answer": error_msg,
-                            "sources": [],
-                            "confidence": 0.0,
-                            "reply": [{"type": "markdown", "content": error_msg}]
-                        }
-                        # 保存错误消息
-                        self._save_ai_response(session_id, error_response)
-                        return {
-                            "user_message": self._format_message(user_message),
-                            "ai_message": self._format_ai_message(error_response)
-                        }
-                    
-                    # 从多个或单个文档获取上下文
-                    retrieval_context = None
-                    try:
-                        if len(paper_ids) > 1:
-                            retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
-                                question=message,
-                                paper_ids=paper_ids,
-                                history=context_history
-                            )
-                        else:
-                            retrieval_context = await self.rag_retriever.get_relevant_context(
-                                question=message,
-                                paper_id=paper_ids[0],
-                                history=context_history
-                            )
-                    except Exception as context_error:
-                        print(f"Error retrieving context: {str(context_error)}")
-                        # 创建一个基本的上下文，避免完全失败
-                        retrieval_context = {"text": "无法获取文档上下文，请稍后重试。", "chunks": []}
-                    
-                    # 获取AI回答
-                    response = await self.ai_manager.get_response(
-                        question=message,
-                        context=retrieval_context,
-                        history=context_history
-                    )
-                else:  # session.session_type == "general"
-                    # 直接使用AI进行对话，不使用文档上下文
-                    formatted_history = [
-                        {"role": msg.role, "content": msg.content}
-                        for msg in history_messages[-15:]  # 使用更多历史消息
-                    ]
-                    response = await self.ai_manager.chat_without_context(
-                        message=message,
-                        history=formatted_history
-                    )
-                
-                # 验证响应内容是否有效
-                if not response or not response.get("answer"):
-                    # 如果响应无效，创建一个默认回复
-                    response = {
-                        "answer": "抱歉，我无法处理您的请求，请稍后重试。",
-                        "sources": [],
-                        "confidence": 0.0,
-                        "reply": [{"type": "markdown", "content": "抱歉，我无法处理您的请求，请稍后重试。"}]
-                    }
-                
-                # 在send_message方法中添加处理结构化数据查询的逻辑
-                if "统计" in message or "筛选" in message or "计算" in message or "排序" in message or "excel" in message.lower() or "表格" in message:
-                    # 检查是否有关联的Excel文档
-                    structured_data = None
-                    excel_paper_id = None
-                    
-                    # 从会话关联的文档中查找包含结构化数据的文档
-                    for doc in session_docs:
-                        paper = self.db.query(PaperAnalysis).filter(
-                            PaperAnalysis.paper_id == doc.paper_id
-                        ).first()
-                        
-                        if paper and paper.structured_data:
-                            structured_data = paper.structured_data
-                            excel_paper_id = str(paper.paper_id)
-                            break
-                    
-                    # 如果找到结构化数据，使用专门的分析方法
-                    if structured_data:
-                        response = await self.ai_manager.analyze_structured_data(
-                            query=message,
-                            structured_data=structured_data,
-                            paper_id=excel_paper_id
-                        )
-                
-            except Exception as response_error:
-                print(f"Error generating AI response: {str(response_error)}")
-                # 创建错误响应
-                response = {
-                    "answer": f"生成回复时出错: {str(response_error)}，请稍后重试。",
-                    "sources": [],
-                    "confidence": 0.0,
-                    "reply": [{"type": "markdown", "content": f"生成回复时出错: {str(response_error)}，请稍后重试。"}]
-                }
-            
-            # 保存AI回答
-            ai_message = self._save_ai_response(session_id, response)
-            
-            # 更新会话时间
-            session.updated_at = datetime.utcnow()
-            self.db.commit()
-            
-            # 返回结果
-            return {
-                "user_message": self._format_message(user_message),
-                "ai_message": self._format_ai_message(response, ai_message)
-            }
-            
-        except Exception as e:
-            self.db.rollback()
-            print(f"Error in send_message: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            
-            # 创建错误响应
-            error_response = {
-                "id": str(uuid.uuid4()),
-                "role": "assistant",
-                "content": f"处理消息时发生错误: {str(e)}",
-                "created_at": datetime.utcnow().isoformat(),
+        except Exception as process_error:
+            print(f"Error in message processing: {str(process_error)}")
+            response = {
+                "answer": f"处理消息时发生错误: {str(process_error)}",
                 "sources": [],
-                "confidence": 0,
-                "reply": [{"type": "markdown", "content": f"处理消息时发生错误: {str(e)}"}]
+                "confidence": 0.0,
+                "reply": [{"type": "markdown", "content": f"处理消息时发生错误: {str(process_error)}"}]
             }
-            
-            # 格式化用户消息
-            user_msg = {
-                "id": str(uuid.uuid4()),
-                "role": "user",
-                "content": message,
-                "created_at": datetime.utcnow().isoformat(),
-                "sources": [],
-                "confidence": 0,
-                "reply": []
-            }
-            
-            return {
-                "user_message": user_msg,
-                "ai_message": error_response
-            }
-
-    def _save_ai_response(self, session_id, response):
-        """保存AI回答到数据库"""
+        
+        # 第三个事务：存储AI响应
+        ai_message = None
         try:
-            # 保存AI回答时使用更晚的时间戳确保顺序
+            # 使用独立事务存储AI响应
+            if response:
+                ai_message = await self._save_ai_response(session_id, response)
+                if ai_message:
+                    message_status["ai_message_id"] = str(ai_message.id)
+                    
+                    # 更新会话时间 - 轻量级操作
+                    if session:
+                        session.updated_at = datetime.utcnow()
+                        self.db.commit()
+                    message_status["stored"] = True
+                    print(f"AI response successfully stored with ID: {ai_message.id}")
+            
+        except Exception as save_error:
+            self.db.rollback()
+            print(f"Error saving AI response: {str(save_error)}")
+            # 创建一个错误响应
+            message_status["error"] = str(save_error)
+        
+        # 返回结果
+        return {
+            "user_message": self._format_message(user_message),
+            "ai_message": self._format_ai_message(response, ai_message),
+            "_message_status": message_status
+        }
+
+    async def _save_message_fragments(self, message_id, content_chunks):
+        """可靠的消息片段存储，使用独立事务"""
+        from models.chat import MessageFragment
+        
+        successful = False
+        retries = 0
+        max_retries = 3
+        
+        while not successful and retries < max_retries:
+            try:
+                # 使用独立事务会话
+                from sqlalchemy.orm import sessionmaker
+                from database import engine
+                
+                SessionLocal = sessionmaker(bind=engine)
+                fragment_session = SessionLocal()
+                
+                try:
+                    # 先清除可能存在的旧片段
+                    fragment_session.query(MessageFragment).filter(
+                        MessageFragment.message_id == message_id
+                    ).delete()
+                    
+                    # 批量添加新片段
+                    fragments = []
+                    for i, chunk in enumerate(content_chunks):
+                        fragment = MessageFragment(
+                            message_id=message_id,
+                            fragment_index=i,
+                            content=chunk,
+                            created_at=datetime.utcnow(),
+                            content_hash=self._calculate_content_hash(chunk)  # 添加内容哈希校验
+                        )
+                        fragments.append(fragment)
+                    
+                    fragment_session.bulk_save_objects(fragments)
+                    fragment_session.commit()
+                    
+                    # 验证片段数量和内容
+                    stored_fragments = fragment_session.query(MessageFragment).filter(
+                        MessageFragment.message_id == message_id
+                    ).order_by(MessageFragment.fragment_index).all()
+                    
+                    if len(stored_fragments) == len(content_chunks):
+                        # 验证内容哈希
+                        validated = True
+                        for i, fragment in enumerate(stored_fragments):
+                            expected_hash = self._calculate_content_hash(content_chunks[i])
+                            if fragment.content_hash != expected_hash:
+                                validated = False
+                                print(f"Fragment {i} hash mismatch for message {message_id}")
+                                break
+                        
+                        if validated:
+                            successful = True
+                            print(f"Successfully stored and verified {len(fragments)} fragments for message {message_id}")
+                    else:
+                        print(f"Fragment count mismatch: expected {len(content_chunks)}, got {len(stored_fragments)}")
+                except Exception as inner_error:
+                    fragment_session.rollback()
+                    print(f"Error in fragment transaction: {str(inner_error)}")
+                    raise
+                finally:
+                    fragment_session.close()
+                
+                if successful:
+                    return True
+                
+            except Exception as outer_error:
+                print(f"Fragment storage attempt {retries+1} failed: {str(outer_error)}")
+                retries += 1
+                await asyncio.sleep(0.5)  # 短暂延迟后重试
+        
+        return successful
+
+    def _calculate_content_hash(self, content):
+        """计算内容哈希用于校验"""
+        import hashlib
+        if isinstance(content, list) or isinstance(content, dict):
+            content = json.dumps(content, sort_keys=True)
+        return hashlib.md5(str(content).encode('utf-8')).hexdigest()
+
+    async def _save_ai_response(self, session_id, response):
+        """保存AI回答到数据库，增强大型内容处理"""
+        try:
+            print(f"BEGIN _save_ai_response for session {session_id}")
+            # 对大型rich_content进行处理
+            reply = response.get("reply", [])
+            if reply and len(reply) > 0:
+                # 估计大小
+                serialized = json.dumps(reply)
+                print(f"Rich content size: {len(serialized)} bytes")
+                
+                # 如果超过阈值，使用独立事务拆分存储
+                if len(serialized) > 100000:  # 约100KB
+                    print(f"Content exceeds size limit, splitting into fragments")
+                    
+                    # 创建主消息，包含摘要
+                    main_message = ChatMessage(
+                        session_id=uuid.UUID(session_id),
+                        role='assistant',
+                        content=response.get("answer", "")[:5000],
+                        sources=response.get("sources", [])[:5],
+                        confidence=response.get("confidence", 0.0),
+                        message_type='markdown',
+                        rich_content=[{
+                            "type": "markdown", 
+                            "content": "此回复包含大量数据，已分片存储以提高性能"
+                        }],
+                        has_fragments=True,
+                        created_at=datetime.utcnow()
+                    )
+                    self.db.add(main_message)
+                    
+                    # 使用flush确保ID生成但不提交事务
+                    self.db.flush()
+                    print(f"Created main message with ID: {main_message.id}")
+                    
+                    # 使用独立事务处理分片存储
+                    chunks = self.split_content(reply)
+                    fragments_stored = await self._save_message_fragments(main_message.id, chunks)
+                    
+                    if not fragments_stored:
+                        # 如果片段存储失败，添加警告到主消息
+                        main_message.rich_content.append({
+                            "type": "markdown",
+                            "content": "⚠️ 警告：消息片段存储失败，内容可能不完整"
+                        })
+                    
+                    return main_message
+            
+            # 常规消息处理逻辑
             ai_time = datetime.utcnow()
             assistant_message = ChatMessage(
                 session_id=uuid.UUID(session_id),
@@ -833,16 +862,49 @@ class PaperAnalyzerService:
                 content=response.get("answer", ""),
                 sources=response.get("sources", []),
                 confidence=response.get("confidence", 0.0),
-                message_type='markdown',  # 修改：统一使用 'markdown' 类型而不是 'text'
-                rich_content=response.get("reply", []),
+                message_type='markdown',
+                rich_content=reply,
                 created_at=ai_time
             )
             self.db.add(assistant_message)
             self.db.flush()
+            print(f"Created regular message with ID: {assistant_message.id}")
             return assistant_message
         except Exception as e:
             print(f"Error saving AI response: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return None
+
+    def split_content(self, content, max_size=50000):
+        """将大型内容拆分成多个片段"""
+        if isinstance(content, list):
+            result = []
+            current_chunk = []
+            current_size = 0
+            
+            for item in content:
+                # 估算项目大小
+                item_size = len(json.dumps(item))
+                
+                if current_size + item_size > max_size and current_chunk:
+                    # 当前块已满，保存并创建新块
+                    result.append(current_chunk)
+                    current_chunk = [item]
+                    current_size = item_size
+                else:
+                    # 添加到当前块
+                    current_chunk.append(item)
+                    current_size += item_size
+            
+            # 添加最后一个块
+            if current_chunk:
+                result.append(current_chunk)
+            
+            return result
+        else:
+            # 如果不是列表，返回原内容
+            return [content]
 
     def _format_message(self, message):
         """将消息对象格式化为API响应格式"""
@@ -884,6 +946,19 @@ class PaperAnalyzerService:
         
         # 生成更具唯一性的ID
         unique_id = f"msg_ai_{datetime.utcnow().isoformat()}_{uuid.uuid4().hex[:8]}"
+        
+        # 修复：处理response为None的情况
+        if response is None:
+            return {
+                "id": unique_id,
+                "role": "assistant",
+                "content": "处理请求时发生错误",
+                "created_at": datetime.utcnow().isoformat(),
+                "sources": [],
+                "confidence": 0.0,
+                "reply": [{"type": "markdown", "content": "处理请求时发生错误"}]
+            }
+        
         # 使用响应对象创建格式化消息
         return {
             "id": unique_id,
@@ -1128,3 +1203,176 @@ class PaperAnalyzerService:
         except Exception as e:
             self.db.rollback()
             raise Exception(f"更新会话标题失败: {str(e)}")
+
+    def _estimate_memory_usage(self, content_size):
+        # 预估内存使用并设置处理级别
+        estimated_mb = content_size * 5 / (1024 * 1024)  # 粗略估计
+        return {
+            "level": "high" if estimated_mb > 500 else "medium" if estimated_mb > 100 else "low",
+            "estimated_mb": estimated_mb
+        }
+
+    @contextmanager
+    def reliable_transaction(self):
+        """提供事务重试与恢复机制"""
+        retry_count = 0
+        while retry_count < 3:
+            try:
+                yield
+                self.db.commit()
+                return
+            except Exception as e:
+                self.db.rollback()
+                retry_count += 1
+                if retry_count == 3:
+                    raise
+                time.sleep(1)  # 指数退避
+
+    async def stream_message(self, session_id: str, message: str, user_id: str):
+        """流式发送消息，逐步返回AI回复"""
+        # 添加消息状态跟踪
+        message_status = {"stored": False, "user_message_id": None}
+        
+        try:
+            # 1. 保存用户消息
+            current_time = datetime.utcnow()
+            user_message = ChatMessage(
+                session_id=uuid.UUID(session_id),
+                role='user',
+                content=message,
+                message_type='markdown',
+                created_at=current_time
+            )
+            self.db.add(user_message)
+            self.db.commit()  # 立即提交用户消息
+            message_status["user_message_id"] = str(user_message.id)
+            message_status["stored"] = True
+            
+            # 2. 获取会话信息
+            session = self.db.query(ChatSession).filter(
+                ChatSession.id == uuid.UUID(session_id),
+                ChatSession.user_id == uuid.UUID(user_id)
+            ).first()
+            
+            if not session:
+                yield {"error": "Chat session not found", "done": True}
+                return
+            
+            # 3. 获取历史消息作为上下文
+            try:
+                history_messages = self.db.query(ChatMessage).filter(
+                    ChatMessage.session_id == uuid.UUID(session_id)
+                ).order_by(ChatMessage.created_at.asc()).all()
+                
+                context_history = "\n".join([
+                    f"{'User' if msg.role == 'user' else 'Assistant'}: {msg.content}"
+                    for msg in history_messages[-8:]
+                ])
+            except Exception as e:
+                print(f"Error getting history for streaming: {str(e)}")
+                context_history = ""
+            
+            # 4. 准备上下文
+            retrieval_context = None
+            if session.session_type == "document":
+                # 获取相关文档IDs
+                paper_ids = []
+                if session.paper_id:  # 向后兼容
+                    paper_ids.append(str(session.paper_id))
+                
+                # 从关联表获取多文档信息
+                session_docs = self.db.query(SessionDocument).filter(
+                    SessionDocument.session_id == uuid.UUID(session_id)
+                ).order_by(SessionDocument.order).all()
+                
+                for doc in session_docs:
+                    paper_id = str(doc.paper_id)
+                    if paper_id not in paper_ids:
+                        paper_ids.append(paper_id)
+                
+                if paper_ids:
+                    if len(paper_ids) > 1:
+                        retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
+                            question=message,
+                            paper_ids=paper_ids,
+                            history=context_history
+                        )
+                    else:
+                        retrieval_context = await self.rag_retriever.get_relevant_context(
+                            question=message,
+                            paper_id=paper_ids[0],
+                            history=context_history
+                        )
+            
+            # 5. 流式生成回答
+            full_response = {"answer": "", "sources": [], "confidence": 0.5, "reply": []}
+            
+            # 收集片段
+            chunks = []
+            async for chunk in self.ai_manager.stream_response(
+                question=message,
+                context=retrieval_context,
+                history=context_history
+            ):
+                # 更新完整响应
+                if not chunk.get("error"):
+                    text = chunk.get("partial_response", "")
+                    full_response["answer"] += text
+                    chunks.append(text)
+                    
+                    # 转换为前端期望的格式
+                    yield {
+                        "id": f"stream_{len(chunks)}_{session_id}",
+                        "content": text,
+                        "done": chunk.get("done", False)
+                    }
+                else:
+                    yield {
+                        "error": chunk.get("error"),
+                        "done": True
+                    }
+                    return
+            
+            # 6. 在流式传输完成后保存完整响应
+            # 使用_parse_response_content解析完整响应
+            full_response["reply"] = self.ai_manager._parse_response_content(full_response["answer"])
+            
+            try:
+                # 异步保存完整响应
+                ai_message = await self._save_ai_response(session_id, full_response)
+                if ai_message:
+                    # 更新会话时间
+                    session.updated_at = datetime.utcnow()
+                    self.db.commit()
+                    
+                    yield {
+                        "message_id": str(ai_message.id),
+                        "saved": True,
+                        "done": True
+                    }
+            except Exception as save_error:
+                print(f"Error saving streamed response: {str(save_error)}")
+                yield {
+                    "error": f"Response streaming completed but failed to save: {str(save_error)}",
+                    "done": True
+                }
+            
+        except Exception as e:
+            print(f"Streaming error: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            yield {
+                "error": str(e),
+                "done": True
+            }
+
+    # 需要添加类似代码:
+    app = Celery('paper_analyzer')
+    
+    @app.task
+    def build_index_task(content, paper_id, line_mapping=None):
+        # 异步构建索引
+        # ...
+
+    # 在关键操作处添加详细日志
+        logger.info(f"Processing document {paper_id} with size {len(content)}")

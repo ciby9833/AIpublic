@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from typing import TypedDict, List, Optional, Union, Dict, Any, Literal
 import json
 import re
+import asyncio
 
 class SourceInfo(TypedDict):
     line_number: int
@@ -55,6 +56,14 @@ class AIManager:
             "top_k": 40,
             "max_output_tokens": 2048,
         }
+        
+        # 添加安全设置
+        self.safety_settings = {
+            "harassment": "block_medium_and_above",
+            "hate_speech": "block_medium_and_above", 
+            "sexually_explicit": "block_medium_and_above",
+            "dangerous_content": "block_medium_and_above"
+        }
 
     async def get_response(self, question: str, context: Union[str, Dict, List[Dict]], history: str = None) -> dict:
         """
@@ -66,84 +75,14 @@ class AIManager:
             history: 对话历史
         """
         try:
-            # 处理空上下文情况
-            if not context:
-                return {
-                    "answer": "抱歉，我无法找到相关的上下文信息来回答这个问题。",
-                    "sources": [],
-                    "confidence": 0.0,
-                    "reply": [
-                        {
-                            "type": "markdown",
-                            "content": "抱歉，我无法找到相关的上下文信息来回答这个问题。"
-                        }
-                    ]
-                }
-
-            # 格式化上下文
-            context_str = ""
-            sources = []
+            # 使用统一的提示词构建方法
+            prompt = self._build_prompt(question, context, history)
             
-            # 处理多种格式的上下文
-            if isinstance(context, str):
-                # 字符串格式的上下文
-                context_str = context
-            elif isinstance(context, dict) and "text" in context:
-                # 单个文档的上下文字典
-                context_str = context["text"]
-                sources = context.get("chunks", [])
-            elif isinstance(context, dict) and "chunks" in context:
-                # 包含chunks的上下文字典
-                context_str = "\n\n".join([chunk.get("content", "") for chunk in context.get("chunks", [])])
-                sources = context.get("chunks", [])
-            elif isinstance(context, list):
-                # 多文档上下文列表
-                for doc_context in context:
-                    if isinstance(doc_context, dict):
-                        doc_id = doc_context.get("document_id", "未知文档")
-                        doc_name = doc_context.get("document_name", "未知文件名")
-                        doc_text = doc_context.get("text", "")
-                        
-                        # 添加文档分隔和来源信息
-                        context_str += f"\n\n【文档: {doc_name}】\n{doc_text}\n"
-                        
-                        # 收集来源信息
-                        for chunk in doc_context.get("chunks", []):
-                            chunk["document_id"] = doc_id
-                            chunk["document_name"] = doc_name
-                            sources.append(chunk)
-            
-            # 构建提示词，包含历史对话并增加对富文本的支持
-            prompt = f"""你是一个专业的论文分析助手。请基于以下上下文和历史对话回答问题。
-
-历史对话：
-{history if history else '这是新的对话'}
-
-当前上下文：
-{context_str}
-
-问题：
-{question}
-
-要求：
-1. 回答要准确、专业，直接基于上下文中的信息
-2. 如果上下文中的信息不足以回答问题，请明确说明
-3. 如果问题与上下文无关，请说明并建议用户提供更多相关信息
-4. 回答要简洁明了，避免冗长的解释
-5. 如果上下文中包含多个相关段落或来自不同文档，请综合这些信息给出完整回答并注明信息来源
-6. 如果发现上下文中的信息有矛盾，请指出并说明
-7. 保持对话的连贯性，参考历史对话中的信息
-8. 支持以下格式：普通文本、Markdown、代码块、表格
-9. 对于表格数据，请使用Markdown表格格式
-10. 对于代码块，请使用Markdown格式，并指定语言
-11. 根据内容的性质，选择最合适的展示方式
-
-请提供你的回答："""
-            
-            # 使用新的 API 调用方式，添加生成参数
+            # 发送到模型生成回答
             response = self.model.generate_content(
                 prompt,
-                generation_config=self.generation_config
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings
             )
             
             # 检查响应
@@ -164,7 +103,7 @@ class AIManager:
             reply_content = self._parse_response_content(response.text)
             
             # 返回结构化数据，同时兼容旧格式和新格式
-            return {
+            response_data = {
                 "answer": str(response.text),  # 保持兼容性
                 "sources": [
                     {
@@ -183,6 +122,14 @@ class AIManager:
                 "confidence": float(getattr(response, 'confidence', 0.8)),
                 "reply": reply_content  # 确保这是通过 _parse_response_content 转换的结构
             }
+            
+            # 计算响应大小
+            response_size = len(json.dumps(response_data, ensure_ascii=False))
+            print(f"Generated AI response with size: {response_size} bytes")
+            if response_size > 50000:  # 50KB threshold for tracking large responses
+                print(f"WARNING: Large response generated!")
+            
+            return response_data
             
         except Exception as e:
             print(f"AI response error details: {str(e)}")
@@ -441,10 +388,15 @@ class AIManager:
         # 处理并合并多文档上下文，然后调用get_response
         return await self.get_response(question, document_contexts, history)
 
-    async def analyze_structured_data(self, query: str, structured_data: dict, paper_id: str = None) -> dict:
+    async def analyze_structured_data(self, query: str, structured_data: dict, paper_id: str = None, is_sampled: bool = False) -> dict:
         """
         分析Excel等结构化数据，执行统计、筛选等操作
         """
+        if is_sampled:
+            print(f"Processing sampled structured data for query: {query}")
+            # 添加采样警告
+            sampling_warning = "\n\n⚠️ **注意**: 由于数据量较大，分析基于数据采样。结果可能反映数据的总体趋势，但不保证精确的统计值。"
+        
         try:
             if not structured_data:
                 return {
@@ -738,12 +690,18 @@ Excel文件结构详情:
             if response and response.text:
                 reply_content = self._parse_response_content(response.text)
                 
+                if is_sampled:
+                    # 添加采样警告到响应中
+                    response_text = response.text + sampling_warning
+                    reply_content = self._parse_response_content(response_text)
+                
                 return {
                     "answer": response.text,
                     "sources": [],  # 结构化数据分析没有具体的来源引用
                     "confidence": float(getattr(response, 'confidence', 0.8)),
                     "reply": reply_content,
-                    "is_structured_analysis": True
+                    "is_structured_analysis": True,
+                    "is_sampled_data": is_sampled
                 }
             else:
                 return {
@@ -763,3 +721,80 @@ Excel文件结构详情:
                 "confidence": 0.0,
                 "reply": [{"type": "markdown", "content": f"分析结构化数据时出错: {str(e)}"}]
             }
+
+    async def stream_response(self, question, context, history=None):
+        try:
+            # 构建提示
+            prompt = self._build_prompt(question, context, history)
+            
+            # 使用新的API名称替换旧方法调用
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=self.generation_config
+            )
+            
+            # 处理返回结果
+            # 如果新API不支持流式处理，可能需要模拟流式输出
+            if hasattr(response, 'text'):
+                # 整个回答一次返回的情况
+                full_text = response.text
+                # 每5个字符模拟一次流式输出
+                for i in range(0, len(full_text), 5):
+                    chunk = full_text[i:i+5]
+                    yield {
+                        "partial_response": chunk,
+                        "done": i+5 >= len(full_text)
+                    }
+                    await asyncio.sleep(0.01)  # 模拟延迟
+            else:
+                # 尝试按新API处理流式输出
+                async for chunk in response:
+                    if hasattr(chunk, 'text'):
+                        yield {
+                            "partial_response": chunk.text,
+                            "done": False
+                        }
+                
+                yield {"partial_response": "", "done": True}
+            
+            
+        except Exception as e:
+            print(f"Stream generation error: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            yield {"error": str(e), "done": True}
+
+    def _build_prompt(self, question, context, history=None):
+        """构建提示词，用于统一不同方法的提示词格式"""
+        
+        # 构建基本提示
+        prompt = "你是CargoPPT的AI助手，专门用于文档分析和问答，请根据提供的文档内容回答问题。\n\n"
+        
+        # 添加上下文信息
+        if isinstance(context, dict) and "text" in context:
+            # 如果是格式化后的上下文对象
+            prompt += f"文档内容：\n{context['text']}\n\n"
+        elif isinstance(context, list) and len(context) > 0:
+            # 如果是上下文列表
+            if all(isinstance(item, dict) for item in context):
+                # 多文档情况
+                for doc in context:
+                    if "text" in doc:
+                        doc_info = f"文档：{doc.get('document_name', '未知文档')}\n"
+                        prompt += f"{doc_info}{doc['text']}\n\n"
+            else:
+                # 纯文本列表
+                prompt += f"文档内容：\n{' '.join(context)}\n\n"
+        elif isinstance(context, str):
+            # 如果是字符串
+            prompt += f"文档内容：\n{context}\n\n"
+        
+        # 添加历史对话
+        if history:
+            prompt += f"历史对话：\n{history}\n\n"
+        
+        # 添加当前问题
+        prompt += f"问题：{question}\n\n"
+        prompt += "请根据以上内容提供详细准确的回答。回答要保持严谨且基于文档内容，不要编造信息。"
+        
+        return prompt

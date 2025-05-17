@@ -22,6 +22,7 @@ import { UserOutlined, MenuUnfoldOutlined, MenuFoldOutlined } from '@ant-design/
 import UserManagement from './pages/UserManagement'
 import DistanceCalculator from './pages/DistanceCalculator'
 import PaperAnalyzer from './pages/PaperAnalyzer'
+import MobileChat from './pages/MobileChat'
 
 const { Header, Content, Footer: AntFooter } = Layout;
 
@@ -526,6 +527,7 @@ function App() {
             </div>
           </ProtectedRoute>
         } />
+        <Route path="/mobile-chat" element={<MobileChat />} />
       </Routes>
     </BrowserRouter>
   )

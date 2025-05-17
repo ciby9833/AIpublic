@@ -362,12 +362,14 @@ export const paperAnalyzerApi = {
 
   // Get chat history for a session
   getChatHistory: async (sessionId: string, limit: number = 20, beforeId?: string): Promise<{messages: any[], has_more: boolean}> => {
+    console.log(`[CHAT_API] Getting chat history for session ${sessionId}, limit: ${limit}, beforeId: ${beforeId || 'none'}`);
     try {
       let url = `${API_BASE_URL}/api/chat-sessions/${sessionId}/messages?limit=${limit}`;
       if (beforeId) {
         url += `&before_id=${beforeId}`;
       }
 
+      console.log(`[CHAT_API] Sending GET request to: ${url}`);
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -377,19 +379,23 @@ export const paperAnalyzerApi = {
       });
 
       if (!response.ok) {
+        console.error(`[CHAT_API] Error fetching messages: Status ${response.status}`);
         throw new Error(`Failed to fetch messages: Status ${response.status}`);
       }
 
       // 直接返回后端的响应结构
-      return await response.json();
+      const result = await response.json();
+      console.log(`[CHAT_API] Received ${result.messages?.length || 0} messages, has_more: ${result.has_more}`);
+      return result;
     } catch (error) {
-      console.error('Failed to get chat history:', error);
+      console.error('[CHAT_API] Failed to get chat history:', error);
       return { messages: [], has_more: false };
     }
   },
 
   // Send a message to a chat session
   sendMessage: async (sessionId: string, message: string): Promise<any> => {
+    console.log(`[CHAT_API] Sending message to session ${sessionId}, length: ${message.length} chars`);
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/messages`,
@@ -405,13 +411,16 @@ export const paperAnalyzerApi = {
       );
 
       if (!response.ok) {
+        console.error(`[CHAT_API] Error sending message: Status ${response.status}`);
         throw new Error(`Failed to send message: Status ${response.status}`);
       }
 
       // Return the complete response - includes both user_message and ai_message
-      return await response.json();
+      const result = await response.json();
+      console.log(`[CHAT_API] Message sent successfully, received response with user_id: ${result.user_message?.id}, ai_id: ${result.ai_message?.id}`);
+      return result;
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('[CHAT_API] Failed to send message:', error);
       throw error;
     }
   },
@@ -600,6 +609,108 @@ export const paperAnalyzerApi = {
     } catch (error) {
       console.error('Failed to delete session:', error);
       throw error;
+    }
+  },
+
+  // Add a new streaming messages method
+  streamMessage: async (sessionId: string, message: string, callbacks: {
+    onChunk: (chunk: any) => void;
+    onComplete: (finalResponse: any) => void;
+    onError: (error: any) => void;
+  }) => {
+    console.log(`[CHAT_API] Streaming message to session ${sessionId}, length: ${message.length} chars`);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chat-sessions/${sessionId}/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message }),
+          credentials: 'include'
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`[CHAT_API] Error streaming message: Status ${response.status}`);
+        callbacks.onError(new Error(`Failed to stream message: Status ${response.status}`));
+        return;
+      }
+
+      // Get reader from response body stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        callbacks.onError(new Error('Stream reader not available'));
+        return;
+      }
+
+      // Used to store partial chunks
+      let partialData = '';
+      let decoder = new TextDecoder();
+      let finalResponse = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        // Decode and process the chunk
+        const chunk = decoder.decode(value, { stream: true });
+        partialData += chunk;
+
+        // Process any complete JSON objects in the stream
+        let startIndex = 0;
+        let endIndex;
+        
+        while ((endIndex = partialData.indexOf('\n', startIndex)) !== -1) {
+          const jsonStr = partialData.substring(startIndex, endIndex).trim();
+          if (jsonStr) {
+            try {
+              const jsonData = JSON.parse(jsonStr);
+              callbacks.onChunk(jsonData);
+              
+              // Save final response when receiving complete flag
+              if (jsonData.complete) {
+                finalResponse = jsonData;
+              }
+            } catch (e) {
+              console.error('Error parsing JSON chunk:', e, jsonStr);
+            }
+          }
+          startIndex = endIndex + 1;
+        }
+        
+        // Keep any remaining partial data
+        partialData = partialData.substring(startIndex);
+      }
+
+      // Process any remaining data
+      if (partialData.trim()) {
+        try {
+          const jsonData = JSON.parse(partialData.trim());
+          callbacks.onChunk(jsonData);
+          
+          if (jsonData.complete) {
+            finalResponse = jsonData;
+          }
+        } catch (e) {
+          console.error('Error parsing final JSON chunk:', e);
+        }
+      }
+
+      // Call onComplete with the final complete response
+      if (finalResponse) {
+        callbacks.onComplete(finalResponse);
+      } else {
+        // If we never got a complete flag, send the last chunk
+        callbacks.onComplete({});
+      }
+      
+      console.log(`[CHAT_API] Stream completed for session ${sessionId}`);
+    } catch (error) {
+      console.error('[CHAT_API] Failed to stream message:', error);
+      callbacks.onError(error);
     }
   },
 };

@@ -36,6 +36,7 @@ from fastapi import Header
 from pydantic import BaseModel
 from auth.models import ChatSession, ChatMessage, User, SessionDocument
 from models.paper import PaperAnalysis  # 使用正确的类名
+from feishu_approval.approval_controller import router as approval_router # 审批控制器 飞书审批控制器   
 
 # 加载环境变量
 load_dotenv()
@@ -315,7 +316,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(auth_router)  # 先注册 auth 路由
 app.include_router(user_router, prefix="/api")  # 再注册用户路由
-
+app.include_router(approval_router) # 添加飞书审批路由
 # 添加一个辅助函数来从当前请求中获取用户ID - 必须在使用前定义
 async def get_current_user_id(
     authorization: Optional[str] = Header(None, description="Bearer token"),
@@ -1297,13 +1298,32 @@ class MessageRequest(BaseModel):
     
 # Update the send_chat_message endpoint
 @app.post("/api/chat-sessions/{session_id}/messages")
-async def send_chat_message(
+async def send_message_to_session(
     session_id: str,
-    request: MessageRequest,
-    db: Session = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
+    request: dict,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
 ):
     try:
+        print(f"API: Message request received for session {session_id}, user {authorization}")
+        
+        # 从authorization header中提取用户ID
+        user_id = None
+        if authorization:
+            if authorization.startswith("Bearer "):
+                token = authorization.replace("Bearer ", "")
+                # 获取用户信息
+                user = await get_current_user(db=db, access_token=token)
+                if user:
+                    user_id = str(user.id)
+        
+        if not user_id:
+            print(f"API: Authentication failed for session {session_id}")
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "AUTHENTICATION_ERROR", "message": "Invalid authentication"}
+            )
+        
         # 验证用户是否有权限访问此会话
         session = db.query(ChatSession).filter(
             ChatSession.id == uuid.UUID(session_id),
@@ -1311,6 +1331,7 @@ async def send_chat_message(
         ).first()
         
         if not session:
+            print(f"API: Session {session_id} not found for user {user_id}")
             raise HTTPException(
                 status_code=404,
                 detail={"code": "SESSION_NOT_FOUND", "message": "Chat session not found"}
@@ -1318,22 +1339,45 @@ async def send_chat_message(
             
         analyzer = get_paper_analyzer(db)
         
-        # 发送消息并获取带有富文本内容的响应
+        # 发送消息
         result = await analyzer.send_message(
             session_id=session_id,
-            message=request.message,
-            user_id=user_id
+            message=request.get("message"),
+            user_id=user_id  # 使用提取出来的user_id而不是raw authorization
         )
         
-        # 重要: 返回完整的结果，包含user_message和ai_message两个字段
-        # 这样前端可以访问 result.user_message.id 和 result.ai_message
+        # 提取并记录消息状态信息
+        message_status = result.pop("_message_status", {"stored": True})
+        
+        # 如果存储失败，记录到系统日志
+        if not message_status.get("stored", True):
+            print(f"WARNING: Message storage incomplete for session {session_id}, user {user_id}")
+            # 可选：添加到专门的错误跟踪表
+            try:
+                from models.system import StorageFailure
+                failure = StorageFailure(
+                    session_id=uuid.UUID(session_id),
+                    user_id=uuid.UUID(user_id),
+                    message_content=request.get("message")[:1000],  # 保存一部分消息内容
+                    user_message_id=message_status.get("user_message_id"),
+                    ai_message_id=message_status.get("ai_message_id"),
+                    failed_at=datetime.utcnow()
+                )
+                db.add(failure)
+                db.commit()
+            except Exception as log_error:
+                print(f"Failed to log storage failure: {str(log_error)}")
+        
+        # 返回结果
         return result
         
     except Exception as e:
-        logger.error(f"Message send error: {str(e)}")
+        print(f"API Error in send_message_to_session: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(
-            status_code=500,
-            detail={"code": "MESSAGE_SEND_ERROR", "message": str(e)}
+            status_code=500, 
+            detail={"code": "SERVER_ERROR", "message": str(e)}
         )
 
 class SessionRequest(BaseModel):
@@ -1811,5 +1855,63 @@ async def update_chat_session_title(
         raise HTTPException(
             status_code=500,
             detail={"code": "SESSION_UPDATE_ERROR", "message": str(e)}
+        )
+
+@app.post("/api/chat-sessions/{session_id}/stream")
+async def stream_message_to_session(
+    session_id: str,
+    request: dict,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 从authorization header中提取用户ID
+        user_id = None
+        if authorization:
+            if authorization.startswith("Bearer "):
+                token = authorization.replace("Bearer ", "")
+                user = await get_current_user(db=db, access_token=token)
+                if user:
+                    user_id = str(user.id)
+        
+        if not user_id:
+            return StreamingResponse(
+                content=iter([json.dumps({"error": "认证失败", "done": True})]),
+                media_type="application/json"
+            )
+        
+        # 验证会话存在
+        session = db.query(ChatSession).filter(
+            ChatSession.id == uuid.UUID(session_id),
+            ChatSession.user_id == uuid.UUID(user_id)
+        ).first()
+        
+        if not session:
+            return StreamingResponse(
+                content=iter([json.dumps({"error": "会话不存在", "done": True})]),
+                media_type="application/json"
+            )
+        
+        # 获取分析器实例并调用流式消息方法
+        analyzer = get_paper_analyzer(db)
+        
+        async def response_stream():
+            async for chunk in analyzer.stream_message(
+                session_id=session_id,
+                message=request.get("message"),
+                user_id=user_id
+            ):
+                yield json.dumps(chunk) + "\n"
+        
+        return StreamingResponse(
+            content=response_stream(),
+            media_type="application/json"
+        )
+        
+    except Exception as e:
+        print(f"Stream API error: {str(e)}")
+        return StreamingResponse(
+            content=iter([json.dumps({"error": str(e), "done": True})]),
+            media_type="application/json"
         )
 

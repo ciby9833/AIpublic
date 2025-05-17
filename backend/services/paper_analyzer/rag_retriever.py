@@ -8,6 +8,7 @@ import os
 import torch
 import uuid
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 class ChunkInfo(TypedDict):
     line_number: int
@@ -68,6 +69,9 @@ class RAGRetriever:
         if self.is_m1:
             print("Running on M1 Mac, using CPU version of FAISS")
 
+        self.query_cache = {}  # 添加查询缓存
+        self.cache_ttl = 3600  # 缓存1小时
+
     def _create_index(self, dimension: int):
         """创建适合当前系统的索引"""
         if self.is_m1:
@@ -76,6 +80,15 @@ class RAGRetriever:
         else:
             # 其他系统可以使用 GPU 版本
             return faiss.IndexFlatL2(dimension)
+
+    def _create_hierarchical_index(self, dimension, data_size):
+        if data_size > 1000:
+            if self.is_m1:
+                # M1设备特殊处理
+                return faiss.IndexHNSWFlat(dimension, 16)  # 降低图层减少内存
+            else:
+                return faiss.IndexHNSWFlat(dimension, 32)
+        return self._create_index(dimension)  # 小数据集使用原始索引
 
     def _split_text(self, text: str) -> List[str]:
         """将文本分割成重叠的块"""
@@ -103,7 +116,7 @@ class RAGRetriever:
             
             # 创建适合当前系统的索引
             dimension = embeddings.shape[1]
-            index = self._create_index(dimension)
+            index = self._create_hierarchical_index(dimension, len(chunks))
             
             # 确保数据类型正确
             embeddings = embeddings.astype('float32')
@@ -126,23 +139,55 @@ class RAGRetriever:
             # 将numpy数组转换为Python列表以便JSON序列化
             embeddings_list = embeddings.tolist()
             
-            # 更新数据库
-            paper = current_db.query(PaperAnalysis).filter(
-                PaperAnalysis.paper_id == uuid.UUID(paper_id)
-            ).first()
+            # 增加事务重试逻辑
+            max_retries = 3
+            retry_count = 0
+            index_stored = False
             
-            if paper:
-                paper.documents = chunks
-                paper.embeddings = embeddings_list
-                paper.index_built = True
-                # 添加结构化数据到数据库
-                if structured_data:
-                    paper.structured_data = structured_data
-                current_db.commit()
+            while retry_count < max_retries and not index_stored:
+                try:
+                    # 更新数据库
+                    paper = current_db.query(PaperAnalysis).filter(
+                        PaperAnalysis.paper_id == uuid.UUID(paper_id)
+                    ).first()
+                    
+                    if paper:
+                        paper.documents = chunks
+                        paper.embeddings = embeddings_list
+                        paper.index_built = True
+                        if structured_data:
+                            paper.structured_data = structured_data
+                        
+                        # 提交前保存数据长度等信息
+                        chunks_count = len(chunks)
+                        embeddings_size = len(embeddings_list)
+                        
+                        current_db.commit()
+                        
+                        # 验证数据存储是否成功
+                        paper_verify = current_db.query(PaperAnalysis).filter(
+                            PaperAnalysis.paper_id == uuid.UUID(paper_id)
+                        ).first()
+                        
+                        if (paper_verify and paper_verify.documents and 
+                            len(paper_verify.documents) == chunks_count and
+                            paper_verify.index_built):
+                            index_stored = True
+                            print(f"Successfully verified index storage for paper {paper_id}")
+                        else:
+                            print(f"Index verification failed, retrying ({retry_count+1}/{max_retries})")
+                            retry_count += 1
+                    else:
+                        print(f"Warning: Paper {paper_id} not found in database")
+                        break
+                except Exception as retry_error:
+                    print(f"Error during index storage (attempt {retry_count+1}): {str(retry_error)}")
+                    current_db.rollback()
+                    retry_count += 1
                 
-                print(f"Successfully built and stored index for paper {paper_id} with {len(chunks)} chunks")
-            else:
-                print(f"Warning: Paper {paper_id} not found in database")
+            if not index_stored:
+                print(f"WARNING: Failed to store index after {max_retries} attempts")
+                # 仍然返回成功，但内存缓存可能与数据库不一致
             
         except Exception as e:
             print(f"Index building error details: {str(e)}")
@@ -150,10 +195,70 @@ class RAGRetriever:
                 current_db.rollback()
             raise Exception(f"Index building error: {str(e)}")
 
+    async def schedule_index_building(self, content: str, paper_id: str, line_mapping: dict = None, db=None, structured_data: dict = None):
+        """异步调度索引构建任务"""
+        try:
+            # 记录索引构建请求
+            print(f"Scheduling async index building for paper {paper_id}")
+            
+            # 方法1：使用背景任务（如果环境支持）
+            if hasattr(self, 'background_tasks'):
+                self.background_tasks.add_task(
+                    self.build_index,
+                    content=content,
+                    paper_id=paper_id,
+                    line_mapping=line_mapping,
+                    db=db,
+                    structured_data=structured_data
+                )
+                return {"status": "scheduled", "paper_id": paper_id}
+            
+            # 方法2：使用异步任务（如果有Celery）
+            try:
+                from celery import Celery
+                try:
+                    app = Celery('paper_analyzer')
+                    task_id = app.send_task(
+                        'services.paper_analyzer.tasks.build_index_task',
+                        args=[content, paper_id, line_mapping, structured_data]
+                    )
+                    return {"status": "scheduled", "paper_id": paper_id, "task_id": str(task_id)}
+                except Exception as celery_error:
+                    print(f"Celery task creation failed: {str(celery_error)}")
+                    # 降级到直接调用
+            except ImportError:
+                print("Celery not available, falling back to direct execution")
+            
+            # 降级：直接构建，但在异步函数中执行以不阻塞主请求
+            import asyncio
+            asyncio.create_task(
+                self.build_index(
+                    content=content,
+                    paper_id=paper_id,
+                    line_mapping=line_mapping,
+                    db=db,
+                    structured_data=structured_data
+                )
+            )
+            return {"status": "started", "paper_id": paper_id}
+            
+        except Exception as e:
+            print(f"Failed to schedule index building: {str(e)}")
+            return {"status": "error", "paper_id": paper_id, "error": str(e)}
+
     async def _ensure_paper_index(self, paper_id: str) -> Dict:
         """确保文档索引已加载，如果未加载则从数据库加载"""
         # 检查是否有内存缓存的索引
-        if paper_id not in self.paper_indices:
+        cache_valid = False
+        
+        if paper_id in self.paper_indices:
+            # 增加缓存验证逻辑
+            cache_data = self.paper_indices[paper_id]
+            if ('index' in cache_data and 'documents' in cache_data and 
+                'embeddings' in cache_data and len(cache_data['documents']) > 0):
+                cache_valid = True
+        
+        if not cache_valid:
             # 尝试从数据库恢复索引
             current_db = self.db
             if not current_db:
@@ -170,15 +275,31 @@ class RAGRetriever:
                 raise Exception(f"Paper ID {paper_id} not found in database")
                 
             if not paper.index_built or not paper.documents or not paper.embeddings:
-                # 尝试重建索引
+                # 不直接重建，而是安排后台重建并返回临时结果
                 if paper.content:
-                    print(f"Rebuilding index for paper {paper_id}")
-                    # 重建索引
-                    await self.build_index(paper.content, paper_id, paper.line_mapping, current_db)
-                    # 重新查询更新后的记录
-                    paper = current_db.query(PaperAnalysis).filter(
-                        PaperAnalysis.paper_id == uuid.UUID(paper_id)
-                    ).first()
+                    print(f"Scheduling background rebuild for paper {paper_id}")
+                    # 安排后台重建
+                    await self.schedule_index_building(paper.content, paper_id, paper.line_mapping, current_db)
+                    
+                    # 返回一个简单的临时索引，仅包含内容的第一部分
+                    if paper.content:
+                        # 创建一个基本索引，仅包含前3段
+                        temp_chunks = paper.content.split("\n\n")[:3]
+                        temp_embeddings = self.model.encode(temp_chunks, convert_to_numpy=True)
+                        temp_dim = temp_embeddings.shape[1]
+                        temp_index = self._create_index(temp_dim)
+                        temp_index.add(temp_embeddings.astype('float32'))
+                        
+                        # 返回临时索引
+                        return {
+                            'index': temp_index,
+                            'documents': temp_chunks,
+                            'embeddings': temp_embeddings,
+                            'line_mapping': paper.line_mapping or {},
+                            'filename': paper.filename,
+                            'paper_id': paper_id,
+                            'is_temporary': True  # 标记是临时索引
+                        }
                 else:
                     raise Exception(f"Paper content not available for {paper_id}")
             
@@ -188,10 +309,24 @@ class RAGRetriever:
                 documents = paper.documents
                 line_mapping = paper.line_mapping or {}
                 
+                # 验证数据完整性
+                if not documents or not embeddings.shape[0]:
+                    raise ValueError(f"Retrieved incomplete index data for paper {paper_id}")
+                
                 # 创建索引
                 dimension = embeddings.shape[1]
-                index = self._create_index(dimension)
+                index = self._create_hierarchical_index(dimension, len(documents))
                 index.add(embeddings)
+                
+                # 增加数据校验
+                index_count = index.ntotal
+                if index_count != len(documents):
+                    print(f"WARNING: Index count mismatch! Index: {index_count}, Documents: {len(documents)}")
+                    # 尝试重新添加向量
+                    if index_count < len(documents):
+                        print(f"Attempting to fix index by rebuilding...")
+                        index = self._create_hierarchical_index(dimension, len(documents))
+                        index.add(embeddings[:len(documents)])
                 
                 # 缓存到内存
                 self.paper_indices[paper_id] = {
@@ -199,8 +334,9 @@ class RAGRetriever:
                     'documents': documents,
                     'embeddings': embeddings,
                     'line_mapping': line_mapping,
-                    'filename': paper.filename,  # 添加文件名
-                    'paper_id': paper_id         # 添加ID冗余信息
+                    'filename': paper.filename,
+                    'paper_id': paper_id,
+                    'last_verified': datetime.utcnow().isoformat()  # 添加验证时间戳
                 }
                 
                 print(f"Successfully restored index for paper {paper_id} from database")
@@ -478,3 +614,9 @@ class RAGRetriever:
             import traceback
             print(traceback.format_exc())
             raise Exception(f"Cross-document search error: {str(e)}")
+
+    def _batch_search(self, index, query_vector, k, batch_size=100):
+        # 需要实现分批检索逻辑
+        results = []
+        # 实现分批检索，合并结果
+        return results

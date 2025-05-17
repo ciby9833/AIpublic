@@ -27,12 +27,13 @@ import { paperAnalyzerApi } from '../../services/paperAnalyzer';
 import './styles.css';
 import type { MenuProps } from 'antd';
 import ChatMessage from './components/index';
-import { ChatMessage as ChatMessageType, ChatSession } from '../../types/chat';
+import { ChatMessage as ChatMessageType, ChatSession, StreamingState } from '../../types/chat';
 import { List as VirtualList, AutoSizer, ListRowProps } from 'react-virtualized';
 import { throttle } from 'lodash';
 import { Modal, Drawer, Empty, Popover, Input as AntInput } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import mermaid from 'mermaid';
+import { useNavigate } from 'react-router-dom';
 
 const { TextArea } = Input;
 const { Sider, Content } = Layout;
@@ -89,6 +90,20 @@ const PaperAnalyzer: React.FC = () => {
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [lastMessageId, setLastMessageId] = useState<string | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const [streamingState, setStreamingState] = useState<StreamingState>({
+    isStreaming: false,
+    partialMessage: ''
+  });
+
+  // 检测是否为移动设备
+  useEffect(() => {
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile) {
+      // 重定向到移动版界面
+      navigate('/mobile-chat');
+    }
+  }, [navigate]);
 
   // 修改滚动到底部函数，使其更加可靠
   const scrollToBottom = (delay = 100) => {
@@ -258,7 +273,7 @@ const PaperAnalyzer: React.FC = () => {
     }
 
     try {
-      // 如果选择了文件但未上传，先上传文件
+      // If a file is selected but not uploaded, upload it first
       if (selectedFile && !currentPaperId) {
         await handleFileUpload(selectedFile);
         if (!currentPaperId) {
@@ -267,17 +282,17 @@ const PaperAnalyzer: React.FC = () => {
         }
       }
       
-      // 保存问题内容
+      // Save question content
       const questionText = question;
       
-      // 清空输入框和文件选择
+      // Clear input and file selection
       setQuestion('');
       setSelectedFile(null);
       
-      // 设置发送状态，禁用发送按钮
+      // Set sending state to disable send button
       setSending(true);
       
-      // 如果没有会话ID，先创建会话
+      // If no session ID exists, create a session first
       let sessionId = currentSessionId;
       if (!sessionId) {
         try {
@@ -304,28 +319,66 @@ const PaperAnalyzer: React.FC = () => {
       }
       
       try {
-        // 发送消息并获取响应
-        const result = await paperAnalyzerApi.sendMessage(sessionId, questionText);
+        // Start streaming state
+        setStreamingState({
+          isStreaming: true,
+          partialMessage: ''
+        });
         
-        // 滚动到底部显示用户问题
-        scrollToBottom();
-        
-        // 直接使用后端返回的完整消息列表更新UI
-        const updatedMessages = await paperAnalyzerApi.getChatHistory(sessionId, 20);
-        if (updatedMessages && updatedMessages.messages) {
-          setResponses(updatedMessages.messages);
-          setHasMoreMessages(updatedMessages.has_more || false);
-          if (updatedMessages.messages.length > 0) {
-            setLastMessageId(updatedMessages.messages[0].id || null);
+        // Use streaming API
+        await paperAnalyzerApi.streamMessage(
+          sessionId,
+          questionText,
+          {
+            onChunk: (chunk) => {
+              if (chunk.delta) {
+                setStreamingState(prev => ({
+                  isStreaming: true,
+                  partialMessage: prev.partialMessage + chunk.delta,
+                  messageId: chunk.message_id || prev.messageId
+                }));
+                scrollToBottom();
+              }
+            },
+            onComplete: async (finalResponse) => {
+              // Reset streaming state
+              setStreamingState({
+                isStreaming: false,
+                partialMessage: ''
+              });
+              
+              // 获取完整的消息列表并完全替换当前的responses
+              const updatedMessages = await paperAnalyzerApi.getChatHistory(sessionId, 20);
+              if (updatedMessages && updatedMessages.messages) {
+                setResponses(updatedMessages.messages);
+                setHasMoreMessages(updatedMessages.has_more || false);
+                if (updatedMessages.messages.length > 0) {
+                  setLastMessageId(updatedMessages.messages[0].id || null);
+                }
+              }
+              
+              // Final scroll to bottom
+              scrollToBottom();
+              setSending(false);
+            },
+            onError: (error) => {
+              console.error("消息流处理失败:", error);
+              message.error('消息处理失败');
+              setStreamingState({
+                isStreaming: false,
+                partialMessage: ''
+              });
+              setSending(false);
+            }
           }
-        }
-        
-        // 滚动到底部显示AI回复
-        scrollToBottom();
+        );
       } catch (error) {
         console.error("发送消息失败:", error);
         message.error('提问失败');
-      } finally {
+        setStreamingState({
+          isStreaming: false,
+          partialMessage: ''
+        });
         setSending(false);
       }
     } catch (error) {
@@ -1163,6 +1216,18 @@ const PaperAnalyzer: React.FC = () => {
                   />
                 )}
               />
+              {streamingState.isStreaming && (
+                <div className="chat-message assistant">
+                  <div className="message-avatar">
+                    <RobotOutlined />
+                  </div>
+                  <div className="message-content">
+                    <ReactMarkdown>
+                      {streamingState.partialMessage || '...'}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
               {sending && (
                 <div className="thinking-animation">
                   <div className="chat-message">

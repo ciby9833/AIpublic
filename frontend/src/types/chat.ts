@@ -127,3 +127,20 @@ export interface RichContentItem {
   rows?: any[][];     // For tables
   metadata?: Record<string, any>; // Additional metadata
 }
+
+// Add these new types for streaming
+export interface StreamChunk {
+  delta: string;
+  complete?: boolean;
+  message_id?: string;
+  sources?: SourceInfo[];
+  confidence?: number;
+  user_message?: ServerMessage;
+  ai_message?: ServerMessage;
+}
+
+export interface StreamingState {
+  isStreaming: boolean;
+  partialMessage: string;
+  messageId?: string;
+}
