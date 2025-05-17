@@ -144,3 +144,13 @@ export interface StreamingState {
   partialMessage: string;
   messageId?: string;
 }
+
+export interface ApiChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+  sources?: SourceInfo[];
+  confidence?: number;
+  reply?: RichContentItem[];
+}

@@ -491,20 +491,34 @@
 }
 
 @media (max-width: 768px) {
+  /* 覆盖原有的移动端布局样式 */
   .paper-analyzer-layout {
-    flex-direction: column;
+    flex-direction: row; /* 强制使用桌面布局 */
   }
 
   .paper-analyzer-sider {
-    height: auto !important;
-    max-height: 50% !important;
-    position: fixed;
-    bottom: 0;
+    position: relative; /* 覆盖固定定位 */
+    height: 100% !important; /* 恢复高度 */
+    max-height: none !important; /* 移除最大高度限制 */
+    bottom: auto; /* 移除底部定位 */
   }
 
   .paper-analyzer-content {
-    margin-bottom: 0;
-    padding-bottom: 50%;
+    margin-bottom: 0; /* 移除底部边距 */
+    padding-bottom: 0; /* 移除底部内边距 */
+  }
+  
+  /* 隐藏移动端特有元素 */
+  .mobile-doc-toggle,
+  .mobile-view-switcher,
+  .chat-handle-bar,
+  .document-content-mobile {
+    display: none !important;
+  }
+  
+  /* 确保文档分割视图始终显示 */
+  .document-content-split {
+    display: flex !important;
   }
 
   .chat-input-container {
@@ -635,6 +649,13 @@
 }
 
 @media (max-width: 480px) {
+  /* 应用相同的覆盖规则 */
+  .mobile-doc-toggle,
+  .mobile-view-switcher,
+  .chat-handle-bar {
+    display: none !important;
+  }
+
   .document-header {
     padding: 4px 6px;
   }

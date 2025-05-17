@@ -1,31 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Input, Button, Spin, Avatar, Modal, Upload, List, Dropdown, message } from 'antd';
+import { Input, Button, Spin, Modal, Upload, List, message } from 'antd';
 import { 
-  SendOutlined, 
-  PlusOutlined, 
+  SendOutlined,
   MenuOutlined, 
   FileTextOutlined,
   UserOutlined,
   RobotOutlined,
   LeftOutlined,
-  PaperClipOutlined,
+  PlusOutlined,
   HistoryOutlined,
   DeleteOutlined,
-  EditOutlined
+  EditOutlined,
+  CloseOutlined,
+  LoadingOutlined
 } from '@ant-design/icons';
 import { aiChatService } from '../../services/aiChatService';
-import { ChatMessage, ChatSession } from '../../types/chat';
-import ChatMessageComponent from '../PaperAnalyzer/components';
-import './mobileChat.css';
+import { ApiChatMessage, ChatSession, StreamingState } from '../../types/chat';
+import { MessagesResponse } from '../../services/aiChatService';
 import ReactMarkdown from 'react-markdown';
+import './mobileChat.css';
 
 const { TextArea } = Input;
 
 const MobileChat: React.FC = () => {
   const navigate = useNavigate();
-  const [message, setMessage] = useState<string>('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messageText, setMessageText] = useState<string>('');
+  const [messages, setMessages] = useState<ApiChatMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [sending, setSending] = useState<boolean>(false);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
@@ -34,7 +35,6 @@ const MobileChat: React.FC = () => {
   const [showMenu, setShowMenu] = useState<boolean>(false);
   const [sessionTitle, setSessionTitle] = useState<string>('新对话');
   const [editingTitle, setEditingTitle] = useState<boolean>(false);
-  const [uploadVisible, setUploadVisible] = useState<boolean>(false);
   const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
   const [lastMessageId, setLastMessageId] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
@@ -42,48 +42,33 @@ const MobileChat: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
-  const [streamingState, setStreamingState] = useState<{
-    isStreaming: boolean;
-    partialMessage: string;
-    messageId?: string;
-  }>({
+  const [streamingState, setStreamingState] = useState<StreamingState>({
     isStreaming: false,
     partialMessage: ''
   });
-
-  // 检查是否是移动设备
-  useEffect(() => {
-    const isMobile = window.innerWidth <= 768;
-    if (!isMobile) {
-      // 如果不是移动设备，重定向到桌面版
-      navigate('/');
-    }
-  }, [navigate]);
 
   // 页面加载时获取最新的会话
   useEffect(() => {
     const loadLatestSession = async () => {
       try {
         setLoading(true);
-        const allSessions = await aiChatService.getAllSessions();
+        const sessionList = await aiChatService.getAllSessions();
         
-        if (allSessions && allSessions.length > 0) {
-          // 找到创建时间最新的活跃会话
-          const latestSession = allSessions[0];
-          setSessions(allSessions);
+        if (Array.isArray(sessionList) && sessionList.length > 0) {
+          const latestSession = sessionList[0];
+          setSessions(sessionList);
           
           try {
-            // 尝试加载最新会话
-            const result = await aiChatService.getMessages(latestSession.id, 20);
-            setMessages(result.messages || []);
-            setHasMoreMessages(result.has_more || false);
-            setLastMessageId(result.messages.length > 0 ? result.messages[0].id : null);
+            const result = await aiChatService.getMessages(latestSession.id, 20) as MessagesResponse;
+            const chatMessages = (result?.messages || []) as unknown as ApiChatMessage[];
+            setMessages(chatMessages);
+            setHasMoreMessages(Boolean(result?.has_more));
+            setLastMessageId((chatMessages[0] as unknown as ApiChatMessage)?.id ?? null);
             
             setCurrentSessionId(latestSession.id);
             setSessionTitle(latestSession.title || "未命名会话");
-            console.log("自动加载最新会话:", latestSession.title);
             
-            // 确保滚动到最新消息
+            // 自动滚动到最新消息
             setTimeout(() => scrollToBottom(0), 300);
           } catch (sessionError) {
             console.error("加载会话失败:", sessionError);
@@ -119,12 +104,12 @@ const MobileChat: React.FC = () => {
 
   // 发送消息
   const handleSendMessage = async () => {
-    if (!message.trim()) {
+    if (!messageText.trim()) {
       return;
     }
 
-    const messageText = message;
-    setMessage('');
+    const userMessage = messageText;
+    setMessageText('');
     setSending(true);
 
     try {
@@ -133,12 +118,14 @@ const MobileChat: React.FC = () => {
       if (!sessionId) {
         try {
           const newSession = await aiChatService.createAiOnlySession();
-          if (!newSession || !newSession.id) {
+          
+          if (newSession && newSession.id) {
+            sessionId = newSession.id;
+            setCurrentSessionId(sessionId);
+            setSessionTitle(newSession.title || '新对话');
+          } else {
             throw new Error('创建会话失败');
           }
-          sessionId = newSession.id;
-          setCurrentSessionId(sessionId);
-          setSessionTitle(newSession.title || '新对话');
         } catch (error) {
           console.error("创建会话失败:", error);
           message.error('创建会话失败');
@@ -147,21 +134,20 @@ const MobileChat: React.FC = () => {
         }
       }
 
-      // 修改临时用户消息格式，统一为API的返回格式
-      const tempUserMessage = {
-        id: 'temp-' + Date.now(),
+      // 添加用户消息到UI - 使用临时ID以便于识别
+      const tempUserMessage: ApiChatMessage = {
+        id: `temp-user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         role: 'user',
-        content: messageText,
+        content: userMessage,
         created_at: new Date().toISOString(),
         sources: [],
         confidence: 0,
         reply: [{
           type: 'markdown',
-          content: messageText
+          content: userMessage
         }]
       };
       
-      // 添加用户消息到UI
       setMessages(prev => [...prev, tempUserMessage]);
       
       // 开始流式状态
@@ -173,10 +159,10 @@ const MobileChat: React.FC = () => {
       // 使用流式API
       await aiChatService.streamMessage(
         sessionId,
-        messageText,
+        userMessage,
         {
           onChunk: (chunk) => {
-            if (chunk.delta) {
+            if (chunk && chunk.delta) {
               setStreamingState(prev => ({
                 isStreaming: true,
                 partialMessage: prev.partialMessage + chunk.delta,
@@ -185,7 +171,7 @@ const MobileChat: React.FC = () => {
               scrollToBottom();
             }
           },
-          onComplete: async (finalResponse) => {
+          onComplete: async () => {
             // 重置流式状态
             setStreamingState({
               isStreaming: false,
@@ -193,21 +179,27 @@ const MobileChat: React.FC = () => {
             });
             
             // 获取完整的消息列表
-            const updatedMessages = await aiChatService.getMessages(sessionId, 20);
-            if (updatedMessages && updatedMessages.messages) {
-              setMessages(updatedMessages.messages);
-              setHasMoreMessages(updatedMessages.has_more || false);
-              if (updatedMessages.messages.length > 0) {
-                setLastMessageId(updatedMessages.messages[0].id || null);
+            try {
+              const updatedMessages = await aiChatService.getMessages(sessionId, 20) as MessagesResponse;
+              if (updatedMessages && updatedMessages.messages) {
+                setMessages((updatedMessages.messages || []) as unknown as ApiChatMessage[]);
+                setHasMoreMessages(Boolean(updatedMessages.has_more));
+                if (updatedMessages.messages.length > 0) {
+                  setLastMessageId((updatedMessages.messages[0] as unknown as ApiChatMessage)?.id ?? null);
+                }
               }
+            } catch (err) {
+              console.error("获取消息失败:", err);
             }
             
             scrollToBottom();
             setSending(false);
           },
           onError: (error) => {
+            const errorMessage = typeof error === 'string' ? error : 
+                                error?.message || '未知错误';
             console.error("消息流处理失败:", error);
-            message.error('发送失败，请重试');
+            message.error(`发送失败: ${errorMessage}`);
             setStreamingState({
               isStreaming: false,
               partialMessage: ''
@@ -234,17 +226,19 @@ const MobileChat: React.FC = () => {
         currentSessionId, 
         20,
         lastMessageId
-      );
+      ) as MessagesResponse;
       
-      if (result && result.messages && result.messages.length > 0) {
-        // 将旧消息添加到消息数组开头
-        setMessages(prev => [...result.messages, ...prev]);
+      if (result && result.messages) {
+        const newMessages = Array.isArray(result.messages) ? result.messages : [];
+        const hasMore = Boolean(result.has_more);
         
-        // 更新分页信息
-        if (result.messages.length > 0) {
-          setLastMessageId(result.messages[0].id || null);
+        // 将旧消息添加到现有消息前面
+        const typedNewMessages = newMessages as unknown as ApiChatMessage[];
+        setMessages(prev => [...typedNewMessages, ...prev]);
+        setHasMoreMessages(hasMore);
+        if (newMessages.length > 0) {
+          setLastMessageId((newMessages[0] as unknown as ApiChatMessage)?.id ?? null);
         }
-        setHasMoreMessages(result.has_more || false);
       } else {
         setHasMoreMessages(false);
       }
@@ -271,7 +265,12 @@ const MobileChat: React.FC = () => {
   const fetchSessions = async () => {
     try {
       const sessionList = await aiChatService.getAllSessions();
-      setSessions(sessionList);
+      if (Array.isArray(sessionList)) {
+        setSessions(sessionList);
+      } else {
+        console.error('Invalid session list format:', sessionList);
+        message.error('获取对话历史格式错误');
+      }
     } catch (error) {
       console.error('获取会话失败:', error);
       message.error('获取会话失败');
@@ -304,7 +303,7 @@ const MobileChat: React.FC = () => {
       setLoading(true);
       
       // 获取聊天历史
-      const result = await aiChatService.getMessages(sessionId, 20);
+      const result = await aiChatService.getMessages(sessionId, 20) as MessagesResponse;
       
       // 更新当前会话信息
       setCurrentSessionId(sessionId);
@@ -317,10 +316,10 @@ const MobileChat: React.FC = () => {
       
       // 设置消息内容
       if (result && result.messages) {
-        setMessages(result.messages);
-        setHasMoreMessages(result.has_more || false);
+        setMessages((result.messages || []) as unknown as ApiChatMessage[]);
+        setHasMoreMessages(Boolean(result.has_more));
         if (result.messages.length > 0) {
-          setLastMessageId(result.messages[0].id || null);
+          setLastMessageId((result.messages[0] as unknown as ApiChatMessage)?.id ?? null);
         }
       } else {
         setMessages([]);
@@ -342,7 +341,7 @@ const MobileChat: React.FC = () => {
   };
 
   // 创建新会话
-  const handleNewChat = async () => {
+  const handleNewChat = () => {
     // 如果当前没有消息且没有会话ID，则不需要创建新会话
     if (messages.length === 0 && !currentSessionId) {
       console.log("当前已经是空白新会话，无需创建");
@@ -357,16 +356,6 @@ const MobileChat: React.FC = () => {
     setSessionTitle("新对话");
     setShowSessions(false);
     setShowMenu(false);
-    
-    // 重新获取会话列表以确保显示最新状态
-    try {
-      const allSessions = await aiChatService.getAllSessions();
-      if (allSessions && allSessions.length > 0) {
-        setSessions(allSessions);
-      }
-    } catch (error) {
-      console.error("获取会话列表失败:", error);
-    }
   };
 
   // 删除会话
@@ -376,16 +365,22 @@ const MobileChat: React.FC = () => {
     setDeleteModalVisible(true);
   };
 
-  // 添加执行删除的函数
+  // 取消删除
+  const cancelDeleteSession = () => {
+    setDeleteModalVisible(false);
+    setSessionToDelete(null);
+  };
+
+  // 确认删除
   const confirmDeleteSession = async () => {
     if (!sessionToDelete) return;
     
     try {
       setLoading(true);
-      await aiChatService.deleteSession(sessionToDelete);
+      const result = await aiChatService.deleteSession(sessionToDelete);
       
       // 删除成功后，更新会话列表
-      setSessions(sessions.filter(session => session.id !== sessionToDelete));
+      setSessions((prev) => prev.filter(session => session.id !== sessionToDelete));
       
       // 如果删除的是当前会话，则清空当前会话
       if (sessionToDelete === currentSessionId) {
@@ -395,26 +390,17 @@ const MobileChat: React.FC = () => {
         setShowSessions(false);
       }
       
-      // 如果删除后没有会话了，也关闭会话列表
-      if (sessions.length <= 1) {
-        setShowSessions(false);
-      }
-      
       message.success('会话已删除');
     } catch (error: any) {
-      message.error(`删除失败: ${error.message}`);
+      // 安全地提取错误消息
+      const errorMessage = error?.message || '未知错误';
+      message.error(`删除失败: ${errorMessage}`);
       console.error('删除会话失败:', error);
     } finally {
       setDeleteModalVisible(false);
       setSessionToDelete(null);
       setLoading(false);
     }
-  };
-
-  // 添加取消删除的函数
-  const cancelDeleteSession = () => {
-    setDeleteModalVisible(false);
-    setSessionToDelete(null);
   };
 
   // 更新会话标题
@@ -428,327 +414,253 @@ const MobileChat: React.FC = () => {
       // 调用API更新标题
       const result = await aiChatService.updateSessionTitle(currentSessionId, sessionTitle);
       
-      // 更新会话列表中的标题
-      if (sessions.length > 0) {
+      // 检查结果格式并显示消息
+      if (result && result.status === 'success') {
+        message.success('会话标题已更新');
+        
+        // 更新会话列表中的标题
         setSessions(sessions.map(session => 
           session.id === currentSessionId 
             ? { ...session, title: sessionTitle } 
             : session
         ));
+      } else {
+        message.success('标题已更新');
       }
       
       setEditingTitle(false);
-      message.success('标题已更新');
     } catch (error: any) {
-      message.error(`保存标题失败: ${error.message}`);
+      // 使用安全的错误消息提取方式
+      const errorMessage = error?.message || '未知错误';
+      message.error(`保存标题失败: ${errorMessage}`);
       console.error('保存标题失败:', error);
       setEditingTitle(false);
     }
   };
 
-  // 处理文件上传
-  const handleFileUpload = async (file: File) => {
-    try {
-      setUploadVisible(false);
-      setLoading(true);
-
-      // 1. 上传文档
-      const result = await aiChatService.uploadDocument(file, currentSessionId);
-      
-      if (result.status === 'success' && result.paper_id) {
-        message.success('文档上传成功');
-        
-        // 如果没有当前会话，创建一个新会话
-        if (!currentSessionId) {
-          const newSession = await aiChatService.createDocumentSession(
-            [result.paper_id],
-            `关于 ${file.name} 的对话`
-          );
-          
-          setCurrentSessionId(newSession.id);
-          setSessionTitle(newSession.title || `关于 ${file.name} 的对话`);
-          
-          // 获取会话消息
-          const messagesResult = await aiChatService.getMessages(newSession.id, 20);
-          setMessages(messagesResult.messages || []);
-          setHasMoreMessages(messagesResult.has_more || false);
-        } else {
-          // 将文档添加到当前会话
-          await aiChatService.addDocumentToSession(currentSessionId, result.paper_id);
-          message.success('文档已添加到当前会话');
-          
-          // 更新消息列表
-          const messagesResult = await aiChatService.getMessages(currentSessionId, 20);
-          setMessages(messagesResult.messages || []);
-          setHasMoreMessages(messagesResult.has_more || false);
-        }
-      } else {
-        message.error(result.message || '文档处理失败');
-      }
-    } catch (error: any) {
-      console.error('文档上传失败:', error);
-      message.error(`上传失败: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 主菜单项
-  const menuItems = [
-    {
-      key: 'new',
-      label: '新建对话',
-      icon: <PlusOutlined />,
-      onClick: handleNewChat
-    },
-    {
-      key: 'history',
-      label: '查看历史会话',
-      icon: <HistoryOutlined />,
-      onClick: showSessionHistory
-    }
-  ];
-
   return (
-    <div className="mobile-chat-container">
-      {/* 头部导航 */}
-      <div className="mobile-chat-header">
+    <div className="x-chat-container">
+      {/* 头部导航区 */}
+      <div className="x-chat-header">
         {showSessions ? (
-          <div className="session-header">
+          <div className="x-session-header">
             <Button 
               icon={<LeftOutlined />}
-              type="link"
+              type="text"
               onClick={() => setShowSessions(false)}
-              className="back-button"
+              className="x-back-button"
             />
-            <div className="header-title">会话历史</div>
+            <div className="x-header-title">会话历史</div>
           </div>
         ) : (
           <>
-            <div className="header-title" onClick={() => setEditingTitle(true)}>
-              {editingTitle ? (
-                <div className="edit-title">
-                  <Input
-                    value={sessionTitle}
-                    onChange={(e) => setSessionTitle(e.target.value)}
-                    onPressEnter={handleTitleSave}
-                    onBlur={handleTitleSave}
-                    size="small"
-                    autoFocus
-                  />
-                </div>
-              ) : (
-                <span>{sessionTitle || "新对话"}</span>
-              )}
+            <div className="x-header-content">
+              <div 
+                className="x-chat-title" 
+                onClick={() => setEditingTitle(true)}
+              >
+                {editingTitle ? (
+                  <div className="x-edit-title">
+                    <Input
+                      value={sessionTitle}
+                      onChange={(e) => setSessionTitle(e.target.value)}
+                      onBlur={handleTitleSave}
+                      onKeyDown={(e) => e.key === 'Enter' && handleTitleSave()}
+                      autoFocus
+                      className="x-title-input"
+                      maxLength={30}
+                    />
+                  </div>
+                ) : (
+                  <div className="x-title-display">
+                    <span>{sessionTitle || "新对话"}</span>
+                    {currentSessionId && <EditOutlined className="x-edit-icon" />}
+                  </div>
+                )}
+              </div>
+              <Button 
+                icon={<MenuOutlined />} 
+                type="text" 
+                onClick={() => setShowMenu(!showMenu)}
+                className="x-menu-button"
+                size="middle"
+              />
             </div>
-            <Button 
-              icon={<MenuOutlined />} 
-              type="link" 
-              onClick={() => setShowMenu(!showMenu)}
-              className="menu-button"
-            />
+            
+            {/* 菜单弹出层 */}
+            {showMenu && (
+              <div className="x-menu-dropdown">
+                <div className="x-menu-items">
+                  <div className="x-menu-item" onClick={handleNewChat}>
+                    <PlusOutlined /> 新建对话
+                  </div>
+                  <div className="x-menu-item" onClick={showSessionHistory}>
+                    <HistoryOutlined /> 历史会话
+                  </div>
+                </div>
+                <div className="x-menu-overlay" onClick={() => setShowMenu(false)} />
+              </div>
+            )}
           </>
         )}
       </div>
 
-      {/* 下拉菜单 */}
-      {showMenu && (
-        <div className="mobile-dropdown-menu">
-          <List
-            dataSource={menuItems}
-            renderItem={(item) => (
-              <List.Item 
-                onClick={item.onClick}
-                className="menu-item"
-              >
-                {item.icon} {item.label}
-              </List.Item>
-            )}
-          />
-        </div>
-      )}
-
-      {/* 会话列表 */}
-      {showSessions ? (
-        <div className="mobile-sessions-list" ref={chatContainerRef}>
-          {loading && (
-            <div className="loading-container">
-              <Spin size="large" />
-            </div>
-          )}
-          {sessions.length > 0 ? (
-            <List
-              dataSource={sessions}
-              renderItem={(session) => (
-                <List.Item 
-                  className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
-                  onClick={() => loadSession(session.id)}
-                >
-                  <div className="session-item-content">
-                    <div className="session-title">
-                      <span>{session.title}</span>
-                    </div>
-                    <div className="session-meta">
-                      <span className="session-time">
-                        {new Date(session.updated_at).toLocaleString('zh-CN', {
-                          month: 'numeric',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
+      {/* 主内容区域 */}
+      <div className="x-chat-body">
+        {showSessions ? (
+          /* 会话列表 */
+          <div className="x-sessions-list" ref={chatContainerRef}>
+            {loading && <div className="x-loading"><Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} /></div>}
+            
+            {sessions.length > 0 ? (
+              <div className="x-sessions-items">
+                {sessions.map(session => (
+                  <div 
+                    key={session.id}
+                    className={`x-session-item ${session.id === currentSessionId ? 'active' : ''}`}
+                    onClick={() => loadSession(session.id)}
+                  >
+                    <div className="x-session-content">
+                      <div className="x-session-info">
+                        <div className="x-session-name">
+                          {session.is_ai_only ? <RobotOutlined className="x-session-icon" /> : <FileTextOutlined className="x-session-icon" />}
+                          <span>{session.title || "未命名会话"}</span>
+                        </div>
+                        <div className="x-session-meta">
+                          <span className="x-session-time">
+                            {new Date(session.updated_at).toLocaleString('zh-CN', {
+                              month: 'numeric',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="x-session-preview">{session.last_message || "空会话"}</div>
                       <Button
                         type="text"
                         danger
                         icon={<DeleteOutlined />}
                         size="small"
                         onClick={(e) => handleDeleteSession(session.id, e)}
-                        className="delete-session-btn"
+                        className="x-delete-button"
                       />
                     </div>
-                    <div className="session-preview">{session.last_message}</div>
                   </div>
-                </List.Item>
-              )}
-            />
-          ) : (
-            !loading && (
-              <div className="empty-state">
-                <div>暂无对话历史</div>
-                <Button 
-                  type="primary" 
-                  onClick={handleNewChat}
+                ))}
+              </div>
+            ) : (
+              !loading && (
+                <div className="x-empty-sessions">
+                  <div className="x-empty-icon"><RobotOutlined /></div>
+                  <div className="x-empty-text">暂无会话历史</div>
+                  <Button 
+                    type="primary" 
+                    onClick={handleNewChat}
+                    className="x-create-button"
+                  >
+                    创建新会话
+                  </Button>
+                </div>
+              )
+            )}
+          </div>
+        ) : (
+          /* 聊天消息区 */
+          <div 
+            className="x-messages-container" 
+            ref={chatContainerRef}
+            onScroll={handleChatScroll}
+          >
+            {isLoadingMore && (
+              <div className="x-loading-more">
+                <Spin size="small" /> 加载更多消息...
+              </div>
+            )}
+            
+            {messages.length === 0 && !loading && (
+              <div className="x-welcome">
+                <div className="x-welcome-icon"><RobotOutlined /></div>
+                <h3>AI助手</h3>
+                <p>有任何问题都可以向我提问</p>
+              </div>
+            )}
+            
+            <div className="x-messages-list">
+              {messages.map((msg) => (
+                <div 
+                  key={`msg-${msg.id || Date.now()}`} 
+                  className={`x-message ${msg.role === 'user' ? 'x-user' : 'x-assistant'}`}
                 >
-                  创建新对话
-                </Button>
-              </div>
-            )
-          )}
-        </div>
-      ) : (
-        // 聊天消息区域
-        <div 
-          className="mobile-chat-messages" 
-          ref={chatContainerRef}
-          onScroll={handleChatScroll}
-        >
-          {isLoadingMore && (
-            <div className="loading-more">
-              <Spin size="small" /> 加载更多...
+                  <div className="x-message-avatar">
+                    {msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                  </div>
+                  <div className="x-message-bubble">
+                    <div className="x-message-text">
+                      <ReactMarkdown>
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              
+              {/* 流式响应消息 */}
+              {streamingState.isStreaming && (
+                <div className="x-message x-assistant">
+                  <div className="x-message-avatar">
+                    <RobotOutlined />
+                  </div>
+                  <div className="x-message-bubble x-streaming">
+                    <div className="x-message-text">
+                      <ReactMarkdown>
+                        {streamingState.partialMessage || '...'}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {sending && !streamingState.isStreaming && (
+                <div className="x-thinking">
+                  <Spin size="small" /> <span>AI正在思考...</span>
+                </div>
+              )}
+              
+              <div ref={messagesEndRef} />
             </div>
-          )}
-          
-          {messages.length === 0 && !loading && (
-            <div className="welcome-message">
-              <div className="welcome-icon">
-                <RobotOutlined />
-              </div>
-              <h3>AI助手</h3>
-              <p>有任何问题都可以向我提问</p>
-            </div>
-          )}
-          
-          {messages.map((msg, index) => (
-            <ChatMessageComponent 
-              key={msg.id || index} 
-              message={{
-                ...msg,
-                question: msg.content,
-                answer: msg.role === 'assistant' ? msg.content : ''
-              }} 
-            />
-          ))}
-          
-          {/* 流式响应消息 */}
-          {streamingState.isStreaming && (
-            <div className="chat-message assistant">
-              <div className="message-avatar">
-                <RobotOutlined />
-              </div>
-              <div className="message-content">
-                <ReactMarkdown>
-                  {streamingState.partialMessage || '...'}
-                </ReactMarkdown>
-              </div>
-            </div>
-          )}
-          
-          {sending && (
-            <div className="thinking-indicator-container">
-              <Spin size="small" tip="AI正在思考..." />
-            </div>
-          )}
-          
-          <div ref={messagesEndRef} />
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      {/* 消息输入框 */}
+      {/* 底部输入区域 - 只在聊天视图时显示 */}
       {!showSessions && (
-        <div className="mobile-chat-input">
-          <div className="input-wrapper">
-            <Button
-              type="text"
-              icon={<PaperClipOutlined />}
-              onClick={() => setUploadVisible(true)}
-              className="upload-button"
-            />
+        <div className="x-chat-footer">
+          <div className="x-input-container">
             <TextArea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
+              placeholder="输入消息..."
+              autoSize={{ minRows: 1, maxRows: 4 }}
               onPressEnter={(e) => {
                 if (!e.shiftKey) {
                   e.preventDefault();
                   handleSendMessage();
                 }
               }}
-              placeholder="输入消息..."
-              autoSize={{ minRows: 1, maxRows: 4 }}
               disabled={sending}
+              className="x-input"
             />
             <Button
               type="primary"
-              shape="circle"
               icon={<SendOutlined />}
               onClick={handleSendMessage}
               loading={sending}
-              disabled={!message.trim()}
-              className="send-button"
+              disabled={!messageText.trim()}
+              className="x-send-button"
             />
           </div>
-        </div>
-      )}
-
-      {/* 文件上传弹窗 */}
-      <Modal
-        title="上传文档"
-        open={uploadVisible}
-        onCancel={() => setUploadVisible(false)}
-        footer={null}
-        centered
-      >
-        <Upload.Dragger
-          accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md"
-          beforeUpload={(file) => {
-            handleFileUpload(file);
-            return false;
-          }}
-          showUploadList={false}
-        >
-          <p className="ant-upload-drag-icon">
-            <FileTextOutlined />
-          </p>
-          <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-          <p className="ant-upload-hint">
-            支持 PDF、Word、Excel、PowerPoint、TXT 文件
-          </p>
-        </Upload.Dragger>
-      </Modal>
-
-      {/* 全局加载状态 */}
-      {loading && (
-        <div className="global-loading">
-          <Spin size="large" />
         </div>
       )}
 
@@ -761,10 +673,18 @@ const MobileChat: React.FC = () => {
         okText="删除"
         cancelText="取消"
         okButtonProps={{ danger: true }}
-        centered
+        closeIcon={<CloseOutlined />}
+        className="x-delete-modal"
       >
-        <p>确定要删除这个对话吗？此操作不可恢复。</p>
+        <p>确定要删除这个会话吗？此操作不可恢复。</p>
       </Modal>
+
+      {/* 全局加载状态 */}
+      {loading && !showSessions && (
+        <div className="x-global-loading">
+          <Spin size="large" />
+        </div>
+      )}
     </div>
   );
 };

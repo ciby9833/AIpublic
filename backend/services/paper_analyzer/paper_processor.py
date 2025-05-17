@@ -21,6 +21,7 @@ import hashlib
 import concurrent.futures
 from functools import partial
 import re
+import subprocess
 
 class ProcessingConfig:
     """文档处理配置"""
@@ -90,7 +91,7 @@ class PaperProcessor:
             if extension == 'pdf':
                 content, line_mapping = await self._process_pdf(file_content)
             elif extension in ['docx', 'doc']:
-                content, line_mapping = await self._process_word(file_content)
+                content, line_mapping = await self._process_word(file_content, filename)
             elif extension in ['pptx', 'ppt']:
                 content, line_mapping = await self._process_powerpoint(file_content)
             elif extension in ['xlsx', 'xls']:
@@ -428,47 +429,103 @@ class PaperProcessor:
                     
         return content, line_mapping
 
-    async def _process_word(self, file_content: bytes) -> tuple:
+    async def _process_word(self, file_content: bytes, filename: str) -> tuple:
         """处理 Word 文件，返回内容和行号映射"""
         try:
-            doc_file = BytesIO(file_content)
-            doc = docx.Document(doc_file)
+            # 获取扩展名
+            extension = filename.lower().split('.')[-1]
             
-            content = ""
-            line_mapping = {}
-            current_line = 1
-            
-            for paragraph in doc.paragraphs:
-                if paragraph.text.strip():
-                    content += paragraph.text + "\n"
-                    line_mapping[current_line] = {
-                        "content": paragraph.text,
-                        "page": 1,
-                        "start_pos": len(content) - len(paragraph.text) - 1,
-                        "end_pos": len(content) - 1,
-                        "is_scanned": False  # 添加这个字段
-                    }
-                    current_line += 1
-            
-            # 处理表格
-            for table in doc.tables:
-                for row in table.rows:
-                    row_text = " | ".join(cell.text for cell in row.cells)
-                    if row_text.strip():
-                        content += row_text + "\n"
+            # 处理.docx格式
+            if extension == 'docx':
+                doc_file = BytesIO(file_content)
+                doc = docx.Document(doc_file)
+                
+                content = ""
+                line_mapping = {}
+                current_line = 1
+                
+                for paragraph in doc.paragraphs:
+                    if paragraph.text.strip():
+                        content += paragraph.text + "\n"
                         line_mapping[current_line] = {
-                            "content": row_text,
+                            "content": paragraph.text,
                             "page": 1,
-                            "start_pos": len(content) - len(row_text) - 1,
+                            "start_pos": len(content) - len(paragraph.text) - 1,
                             "end_pos": len(content) - 1,
                             "is_scanned": False  # 添加这个字段
                         }
                         current_line += 1
-                    
-            return content, line_mapping
+                
+                # 处理表格
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text for cell in row.cells)
+                        if row_text.strip():
+                            content += row_text + "\n"
+                            line_mapping[current_line] = {
+                                "content": row_text,
+                                "page": 1,
+                                "start_pos": len(content) - len(row_text) - 1,
+                                "end_pos": len(content) - 1,
+                                "is_scanned": False  # 添加这个字段
+                            }
+                            current_line += 1
+                
+                return content, line_mapping
+            
+            # 处理.doc格式（旧版Word）
+            elif extension == 'doc':
+                # 考虑使用其他库处理.doc文件
+                # 例如：使用textract或其他兼容工具
+                # 临时解决方案：使用通用文本提取模式
+                return await self._extract_doc_content(file_content)
             
         except Exception as e:
             raise Exception(f"Word processing error: {str(e)}")
+
+    async def _extract_doc_content(self, file_content: bytes) -> tuple:
+        """尝试从旧版Word文档(.doc)中提取文本"""
+        try:
+            # 这里需要添加依赖：pip install textract 或其他替代方案
+            import tempfile
+            import subprocess
+            
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(suffix='.doc', delete=False) as temp:
+                temp_path = temp.name
+                temp.write(file_content)
+            
+            # 使用外部工具antiword提取文本（需安装）
+            try:
+                content = subprocess.check_output(['antiword', temp_path]).decode('utf-8')
+            except:
+                # 降级方案：尝试使用strings提取一些文本
+                content = subprocess.check_output(['strings', temp_path]).decode('utf-8')
+                
+            # 清理临时文件
+            os.unlink(temp_path)
+            
+            # 构建简单行映射
+            lines = content.split('\n')
+            line_mapping = {}
+            current_pos = 0
+            
+            for i, line in enumerate(lines, 1):
+                content_len = len(line)
+                if line.strip():
+                    line_mapping[i] = {
+                        "content": line,
+                        "page": 1,
+                        "start_pos": current_pos,
+                        "end_pos": current_pos + content_len,
+                        "is_scanned": False
+                    }
+                current_pos += content_len + 1  # +1 for newline
+            
+            return content, line_mapping
+            
+        except Exception as e:
+            raise Exception(f"DOC extraction error: {str(e)}")
 
     async def _process_powerpoint(self, file_content: bytes) -> tuple:
         """处理 PowerPoint 文件，返回内容和行号映射"""

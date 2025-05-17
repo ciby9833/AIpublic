@@ -801,10 +801,11 @@ Excel文件结构详情:
         
         if is_general_chat:
             # 通用聊天模式提示词
-            prompt = """你是一个全能的AI助手，能够回答各种问题。无论是一般知识、当前事件、科学探索、文学艺术，还是技术问题，你都可以提供丰富的信息和深入的见解。
+            history_text = history or "无"
+            prompt = f"""你是一个全能的AI助手，能够回答各种问题。无论是一般知识、当前事件、科学探索、文学艺术，还是技术问题，你都可以提供丰富的信息和深入的见解。
 
 历史对话:
-{history or "无"}
+{history_text}
 
 用户问题: {question}
 
@@ -843,7 +844,7 @@ Excel文件结构详情:
         if not is_general_chat:  # 文档模式特有
             prompt += "请根据以上内容提供详细准确的回答。回答要保持严谨且基于文档内容，不要编造信息。"
         
-        return prompt.format(history=history, question=question)
+        return prompt
 
     async def identify_intent(self, question: str, context=None, has_documents=False, history=None):
         """识别用户意图，确定最佳响应模式"""

@@ -1056,8 +1056,8 @@ const PaperAnalyzer: React.FC = () => {
       <Sider 
         width={siderWidth}
         collapsible={false}
-        collapsed={window.innerWidth <= 768 ? isMobileCollapsed : collapsed}
-        className={`paper-analyzer-sider ${window.innerWidth <= 768 && isMobileCollapsed ? 'ant-layout-sider-collapsed' : ''}`}
+        collapsed={collapsed}
+        className="paper-analyzer-sider"
         style={{ transition: isResizing ? 'none' : '' }}
       >
         <div className="chat-container" ref={chatContainerRef}>
@@ -1337,14 +1337,9 @@ const PaperAnalyzer: React.FC = () => {
           <div className="handle-bar"></div>
         </div>
       )}
-
-      {/* Add inside your JSX where the chat header is */}
-      {window.innerWidth <= 768 && (
-        <div className="chat-handle-bar" onClick={toggleMobileChat} />
-      )}
     </Sider>
 
-    <Content className={`paper-analyzer-content ${window.innerWidth <= 768 ? `mobile-${mobileView}-view` : ''}`}>
+    <Content className="paper-analyzer-content">
       <div className="document-viewer">
         <div className="document-header">
           <div className="header-left">
@@ -1541,65 +1536,6 @@ const PaperAnalyzer: React.FC = () => {
           </div>
         )}
       </div>
-
-      {window.innerWidth <= 768 && (
-        <div className="mobile-view-switcher">
-          <Button 
-            type={mobileView === 'document' ? 'primary' : 'default'}
-            onClick={() => setMobileView('document')}
-          >
-            <FileTextOutlined /> Document
-          </Button>
-          <Button 
-            type={mobileView === 'chat' ? 'primary' : 'default'}
-            onClick={() => setMobileView('chat')}
-          >
-            <MessageOutlined /> Chat
-          </Button>
-        </div>
-      )}
-
-      {!showSessions && showDocumentsList && (
-        <div className="documents-popup">
-          <div className="documents-popup-header">
-            <span>会话文档 ({sessionDocuments.length})</span>
-            <Button 
-              type="text" 
-              icon={<CloseCircleOutlined />} 
-              onClick={() => setShowDocumentsList(false)}
-              size="small"
-            />
-          </div>
-          <div className="documents-popup-content">
-            {sessionDocuments.map(doc => (
-              <div 
-                key={doc.paper_id} 
-                className="document-item"
-                onClick={() => {
-                  handleViewDocument(doc.paper_id, doc.filename);
-                  setShowDocumentsList(false);
-                }}
-              >
-                <div className="document-icon">
-                  {doc.file_type?.includes('pdf') ? <FilePdfOutlined /> : 
-                   doc.file_type?.includes('doc') ? <FileWordOutlined /> : 
-                   <FileTextOutlined />}
-                </div>
-                <div className="document-info">
-                  <div className="document-name" title={doc.filename}>
-                    {doc.filename}
-                  </div>
-                  {doc.file_size && (
-                    <div className="document-size">
-                      {(doc.file_size / 1024 / 1024).toFixed(2)} MB
-                  </div>
-                )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </Content>
   </Layout>
   );
