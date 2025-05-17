@@ -438,6 +438,20 @@ const MobileChat: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    const checkDeviceAndRedirect = () => {
+      const isDesktop = window.innerWidth > 768;
+      if (isDesktop) {
+        navigate('/paper-analyzer'); // 或主页面路径
+      }
+    };
+    
+    checkDeviceAndRedirect();
+    window.addEventListener('resize', checkDeviceAndRedirect);
+    
+    return () => window.removeEventListener('resize', checkDeviceAndRedirect);
+  }, [navigate]);
+
   return (
     <div className="x-chat-container">
       {/* 头部导航区 */}

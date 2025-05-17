@@ -71,7 +71,7 @@ const PaperAnalyzer: React.FC = () => {
   const [syncScrolling, setSyncScrolling] = useState<boolean>(true);
   const originalContentRef = useRef<HTMLDivElement>(null);
   const translatedContentRef = useRef<HTMLDivElement>(null);
-  const [siderWidth, setSiderWidth] = useState(400);
+  const [siderWidth, setSiderWidth] = useState(800);
   const [isResizing, setIsResizing] = useState(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
@@ -98,11 +98,21 @@ const PaperAnalyzer: React.FC = () => {
 
   // 检测是否为移动设备
   useEffect(() => {
-    const isMobile = window.innerWidth <= 768;
-    if (isMobile) {
-      // 重定向到移动版界面
-      navigate('/mobile-chat');
-    }
+    const checkDeviceAndRedirect = () => {
+      const isMobile = window.innerWidth <= 768;
+      if (isMobile) {
+        navigate('/mobile-chat');
+      }
+    };
+    
+    // 首次检查
+    checkDeviceAndRedirect();
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', checkDeviceAndRedirect);
+    
+    // 清理监听器
+    return () => window.removeEventListener('resize', checkDeviceAndRedirect);
   }, [navigate]);
 
   // 修改滚动到底部函数，使其更加可靠
@@ -188,6 +198,10 @@ const PaperAnalyzer: React.FC = () => {
           try {
             await paperAnalyzerApi.addDocumentToSession(sessionId, result.paper_id);
             console.log(`文档已添加到当前会话: ${sessionId}`);
+            
+            // Add this line to fetch updated document list after adding document
+            await fetchSessionDocuments(sessionId);
+            
           } catch (error: any) {
             console.error('添加文档到会话失败:', error);
             
@@ -205,7 +219,6 @@ const PaperAnalyzer: React.FC = () => {
                 onOk: async () => {
                   await handleNewChat();
                   // 安全地处理异步操作
-                  
                 }
               });
             } else {
@@ -545,7 +558,7 @@ const PaperAnalyzer: React.FC = () => {
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!isResizing) return;
     const delta = e.clientX - startXRef.current;
-    const newWidth = Math.max(300, Math.min(800, startWidthRef.current + delta));
+    const newWidth = Math.max(300, Math.min(1000, startWidthRef.current + delta));
     setSiderWidth(newWidth);
   }, [isResizing]);
 
@@ -984,8 +997,12 @@ const PaperAnalyzer: React.FC = () => {
     setDocumentContent("");
   };
 
-  // Create a new function to toggle the document list visibility
-  const toggleDocumentsList = () => {
+  // Modify the toggleDocumentsList function
+  const toggleDocumentsList = async () => {
+    // Refresh the documents list when opening
+    if (!showDocumentsList && currentSessionId) {
+      await fetchSessionDocuments(currentSessionId);
+    }
     setShowDocumentsList(!showDocumentsList);
   };
 
@@ -1537,6 +1554,52 @@ const PaperAnalyzer: React.FC = () => {
         )}
       </div>
     </Content>
+
+    {/* Add documents list drawer right before the final Layout closing tag */}
+    <Drawer
+      title="会话文档"
+      placement="right"
+      open={showDocumentsList}
+      onClose={toggleDocumentsList}
+      width={320}
+    >
+      {sessionDocuments.length > 0 ? (
+        <List
+          dataSource={sessionDocuments}
+          renderItem={(doc) => (
+            <List.Item 
+              key={doc.id} 
+              className="session-document-item"
+              onClick={() => {
+                handleViewDocument(doc.paper_id, doc.filename);
+                setShowDocumentsList(false);
+              }}
+            >
+              <div className="document-item-content">
+                <div className="document-title">
+                  <FileTextOutlined />
+                  <span>{doc.filename}</span>
+                </div>
+                <div className="document-info">
+                  {doc.upload_time && (
+                    <span className="document-time">
+                      {new Date(doc.upload_time).toLocaleString('zh-CN', {
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </List.Item>
+          )}
+        />
+      ) : (
+        <Empty description="当前会话没有文档" />
+      )}
+    </Drawer>
   </Layout>
   );
 };

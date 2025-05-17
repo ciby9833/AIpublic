@@ -1,6 +1,6 @@
 .footer {
   width: 100%;
-  height: 48px; /* 设置固定高度 */
+  height: 15px; /* 设置固定高度 */
   padding: 0; /* 移除原有的 padding */
   background-color: #f8f9fa;
   border-top: 1px solid #e0e0e0;
@@ -23,18 +23,18 @@
 
 .copyright {
   color: #666;
-  font-size: 14px;
-  line-height: 48px; /* 与 footer 高度一致，确保文字垂直居中 */
+  font-size: 12px;
+  line-height: 15px; /* 与 footer 高度一致，确保文字垂直居中 */
 }
 
 /* 添加响应式调整 */
 @media (max-width: 768px) {
   .footer {
-    height: 40px; /* 在移动端稍微降低高度 */
+    height: 10px; /* 在移动端稍微降低高度 */
   }
   
   .copyright {
-    line-height: 40px;
-    font-size: 12px;
+    line-height: 10px;
+    font-size: 10px;
   }
 }
