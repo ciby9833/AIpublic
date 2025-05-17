@@ -355,8 +355,8 @@ export const paperAnalyzerApi = {
   createAiOnlySession: async (title: string): Promise<ChatSession> => {
     return paperAnalyzerApi.createChatSession({
       title: title,
-      is_ai_only: true, // 显式设置为AI-only会话
-      paper_ids: [] // 空数组表示无相关文档
+      is_ai_only: true, // 确保设置为true
+      paper_ids: [] // 空数组表示无文档
     });
   },
 
@@ -390,38 +390,6 @@ export const paperAnalyzerApi = {
     } catch (error) {
       console.error('[CHAT_API] Failed to get chat history:', error);
       return { messages: [], has_more: false };
-    }
-  },
-
-  // Send a message to a chat session
-  sendMessage: async (sessionId: string, message: string): Promise<any> => {
-    console.log(`[CHAT_API] Sending message to session ${sessionId}, length: ${message.length} chars`);
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/chat-sessions/${sessionId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ message }),
-          credentials: 'include'
-        }
-      );
-
-      if (!response.ok) {
-        console.error(`[CHAT_API] Error sending message: Status ${response.status}`);
-        throw new Error(`Failed to send message: Status ${response.status}`);
-      }
-
-      // Return the complete response - includes both user_message and ai_message
-      const result = await response.json();
-      console.log(`[CHAT_API] Message sent successfully, received response with user_id: ${result.user_message?.id}, ai_id: ${result.ai_message?.id}`);
-      return result;
-    } catch (error) {
-      console.error('[CHAT_API] Failed to send message:', error);
-      throw error;
     }
   },
 
@@ -612,7 +580,7 @@ export const paperAnalyzerApi = {
     }
   },
 
-  // Add a new streaming messages method
+  // streamMessage改为唯一的消息发送方法
   streamMessage: async (sessionId: string, message: string, callbacks: {
     onChunk: (chunk: any) => void;
     onComplete: (finalResponse: any) => void;

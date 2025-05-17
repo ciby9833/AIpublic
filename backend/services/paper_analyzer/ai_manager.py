@@ -62,23 +62,51 @@ class AIManager:
             "harassment": "block_medium_and_above",
             "hate_speech": "block_medium_and_above", 
             "sexually_explicit": "block_medium_and_above",
-            "dangerous_content": "block_medium_and_above"
+            "dangerous": "block_medium_and_above"
         }
 
     async def get_response(self, question: str, context: Union[str, Dict, List[Dict]], history: str = None) -> dict:
-        """
-        从文档上下文获取回答
-        
-        参数:
-            question: 用户问题
-            context: 文档上下文，可以是字符串、单个文档上下文字典或多个文档上下文列表
-            history: 对话历史
-        """
+        """根据意图智能选择处理模式生成回答"""
         try:
-            # 使用统一的提示词构建方法
-            prompt = self._build_prompt(question, context, history)
+            # 判断是否有文档上下文
+            has_documents = bool(context and context != "")
             
-            # 发送到模型生成回答
+            # 识别用户意图
+            intent = await self.identify_intent(question, context, has_documents, history)
+            print(f"Identified intent: {intent} for question: {question[:30]}...")
+            
+            # 基于意图选择响应模式
+            if intent == "GENERAL_QUERY":
+                # 通用模式 - 仅使用AI知识，不参考文档
+                prompt = f"""你是CargoPPT的AI助手。
+                
+历史对话：{history or '无'}
+
+用户问题：{question}
+
+请根据你的知识回答这个问题，不要提及任何文档。"""
+                
+            elif intent == "ANALYSIS_QUERY":
+                # 分析模式 - 结合文档内容与外部知识
+                prompt = self._build_prompt(question, context, history)
+                # 增加分析指令
+                prompt += "\n请深入分析文档内容，并结合你的知识提供全面评估。可以使用表格、要点等方式组织你的回答。"
+                
+            elif intent == "CONTEXT_QUERY":
+                # 上下文模式 - 主要参考对话历史
+                prompt = f"""你是CargoPPT的AI助手。
+                
+历史对话：{history or '无'}
+
+用户问题：{question}
+
+请根据以上对话历史回答用户的问题。"""
+                
+            else:  # DOCUMENT_QUERY 或默认
+                # 文档回答模式 - 使用标准提示词
+                prompt = self._build_prompt(question, context, history)
+            
+            # 生成回答
             response = self.model.generate_content(
                 prompt,
                 generation_config=self.generation_config,
@@ -120,7 +148,8 @@ class AIManager:
                     for source in sources
                 ],
                 "confidence": float(getattr(response, 'confidence', 0.8)),
-                "reply": reply_content  # 确保这是通过 _parse_response_content 转换的结构
+                "reply": reply_content,
+                "intent": intent  # 添加意图信息
             }
             
             # 计算响应大小
@@ -132,7 +161,10 @@ class AIManager:
             return response_data
             
         except Exception as e:
-            print(f"AI response error details: {str(e)}")
+            print(f"Response generation error: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            
             error_message = f"抱歉，生成回答时出现错误：{str(e)}"
             return {
                 "answer": error_message,
@@ -764,37 +796,186 @@ Excel文件结构详情:
             print(traceback.format_exc())
             yield {"error": str(e), "done": True}
 
-    def _build_prompt(self, question, context, history=None):
+    def _build_prompt(self, question, context, history=None, is_general_chat=False):
         """构建提示词，用于统一不同方法的提示词格式"""
         
-        # 构建基本提示
-        prompt = "你是CargoPPT的AI助手，专门用于文档分析和问答，请根据提供的文档内容回答问题。\n\n"
-        
-        # 添加上下文信息
-        if isinstance(context, dict) and "text" in context:
-            # 如果是格式化后的上下文对象
-            prompt += f"文档内容：\n{context['text']}\n\n"
-        elif isinstance(context, list) and len(context) > 0:
-            # 如果是上下文列表
-            if all(isinstance(item, dict) for item in context):
-                # 多文档情况
-                for doc in context:
-                    if "text" in doc:
-                        doc_info = f"文档：{doc.get('document_name', '未知文档')}\n"
-                        prompt += f"{doc_info}{doc['text']}\n\n"
-            else:
-                # 纯文本列表
-                prompt += f"文档内容：\n{' '.join(context)}\n\n"
-        elif isinstance(context, str):
-            # 如果是字符串
-            prompt += f"文档内容：\n{context}\n\n"
+        if is_general_chat:
+            # 通用聊天模式提示词
+            prompt = """你是一个全能的AI助手，能够回答各种问题。无论是一般知识、当前事件、科学探索、文学艺术，还是技术问题，你都可以提供丰富的信息和深入的见解。
+
+历史对话:
+{history or "无"}
+
+用户问题: {question}
+
+请直接回答问题，不需要参考任何文档资料。根据问题性质灵活调整回答风格和深度。"""
+        else:
+            # 构建基本提示 - 文档分析模式
+            prompt = "你是CargoPPT的AI助手，专门用于文档分析和问答，请根据提供的文档内容回答问题。\n\n"
+            
+            # 添加上下文信息
+            if isinstance(context, dict) and "text" in context:
+                # 如果是格式化后的上下文对象
+                prompt += f"文档内容：\n{context['text']}\n\n"
+            elif isinstance(context, list) and len(context) > 0:
+                # 如果是上下文列表
+                if all(isinstance(item, dict) for item in context):
+                    # 多文档情况
+                    for doc in context:
+                        if "text" in doc:
+                            doc_info = f"文档：{doc.get('document_name', '未知文档')}\n"
+                            prompt += f"{doc_info}{doc['text']}\n\n"
+                else:
+                    # 纯文本列表
+                    prompt += f"文档内容：\n{' '.join(context)}\n\n"
+            elif isinstance(context, str):
+                # 如果是字符串
+                prompt += f"文档内容：\n{context}\n\n"
         
         # 添加历史对话
         if history:
-            prompt += f"历史对话：\n{history}\n\n"
+            if not is_general_chat:  # 文档模式特有
+                prompt += f"历史对话：\n{history}\n\n"
         
         # 添加当前问题
         prompt += f"问题：{question}\n\n"
-        prompt += "请根据以上内容提供详细准确的回答。回答要保持严谨且基于文档内容，不要编造信息。"
         
-        return prompt
+        if not is_general_chat:  # 文档模式特有
+            prompt += "请根据以上内容提供详细准确的回答。回答要保持严谨且基于文档内容，不要编造信息。"
+        
+        return prompt.format(history=history, question=question)
+
+    async def identify_intent(self, question: str, context=None, has_documents=False, history=None):
+        """识别用户意图，确定最佳响应模式"""
+        
+        # 构建意图识别的提示词
+        intent_prompt = f"""分析以下用户问题，并确定最合适的回答模式。
+问题: {question}
+
+{'有文档上下文' if has_documents else '无文档上下文'}
+{'有对话历史记录' if history else '无对话历史记录'}
+
+请判断这个问题属于哪种类型:
+1. GENERAL_QUERY: 通用问询，与文档无关
+2. DOCUMENT_QUERY: 关于文档内容的具体问询
+3. ANALYSIS_QUERY: 需要对文档进行分析处理的请求
+4. CONTEXT_QUERY: 关于当前对话上下文的问询
+
+仅回复类型名称，不要解释。"""
+
+        # 调用模型简洁分析意图
+        try:
+            intent_response = self.model.generate_content(
+                intent_prompt,
+                generation_config={
+                    "temperature": 0.1,
+                    "max_output_tokens": 20
+                }
+            )
+            
+            intent = intent_response.text.strip()
+            
+            # 规范化意图结果
+            if "GENERAL" in intent:
+                return "GENERAL_QUERY"
+            elif "DOCUMENT" in intent:
+                return "DOCUMENT_QUERY"
+            elif "ANALYSIS" in intent:
+                return "ANALYSIS_QUERY"
+            elif "CONTEXT" in intent:
+                return "CONTEXT_QUERY"
+            else:
+                # 默认为文档查询(如果有文档)，否则通用查询
+                return "DOCUMENT_QUERY" if has_documents else "GENERAL_QUERY"
+            
+        except Exception as e:
+            print(f"Intent identification error: {str(e)}")
+            # 默认为文档查询(如果有文档)，否则通用查询
+            return "DOCUMENT_QUERY" if has_documents else "GENERAL_QUERY"
+
+    async def chat_without_context_stream(self, message: str, history: Optional[List[Dict[str, str]]] = None):
+        """
+        无文档上下文的流式对话生成方法
+        
+        参数:
+            message: 用户消息
+            history: 格式化后的对话历史 [{"role": "user|assistant", "content": "消息内容"}, ...]
+        """
+        try:
+            # 构建对话历史格式
+            chat_history = []
+            if history and isinstance(history, list):
+                for msg in history:
+                    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                        # 转换为Gemini API所需的格式
+                        role = "user" if msg["role"] == "user" else "model"
+                        chat_history.append({
+                            "role": role,
+                            "parts": [{"text": msg["content"]}]
+                        })
+            
+            # 构建更适合通用对话的系统提示词
+            if not chat_history:
+                # 如果没有历史记录，使用独立提示词
+                system_prompt = """你是一个强大的AI助手，能够回答各种问题，包括一般知识问题、深度解析问题和专业领域问题。
+                
+你应该:
+1. 直接回答用户问题，提供准确、有用的信息
+2. 使用清晰、自然的语言进行交流
+3. 在适当时使用Markdown格式增强可读性
+4. 当涉及专业知识时，提供深入的解析
+5. 当不确定答案时，诚实表明
+
+用户问题: {message}
+
+请直接回答上述问题，不需要提及文档。"""
+                
+                # 使用流式生成
+                response = await self.model.generate_content_async(
+                    system_prompt,
+                    generation_config=self.generation_config,
+                    safety_settings=self.safety_settings
+                )
+            else:
+                # 如果有历史记录，使用聊天模式
+                # 添加当前用户消息
+                chat_history.append({
+                    "role": "user",
+                    "parts": [{"text": message}]
+                })
+                
+                # 使用历史对话开始聊天
+                chat = self.model.start_chat(history=chat_history[:-1])
+                response = await chat.send_message_async(
+                    message,
+                    generation_config=self.generation_config,
+                    safety_settings=self.safety_settings
+                )
+            
+            # 处理流式响应
+            if hasattr(response, 'text'):
+                # 模拟流式输出
+                full_text = response.text
+                for i in range(0, len(full_text), 5):
+                    chunk = full_text[i:i+5]
+                    yield {
+                        "partial_response": chunk,
+                        "done": i+5 >= len(full_text)
+                    }
+                    await asyncio.sleep(0.01)
+            else:
+                # 真正的流式处理
+                async for chunk in response:
+                    if hasattr(chunk, 'text'):
+                        yield {
+                            "partial_response": chunk.text,
+                            "done": False
+                        }
+                
+                yield {"partial_response": "", "done": True}
+            
+        except Exception as e:
+            print(f"通用聊天流式生成错误: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            yield {"error": str(e), "done": True}

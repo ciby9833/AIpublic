@@ -67,7 +67,7 @@ const MobileChat: React.FC = () => {
         setLoading(true);
         const allSessions = await aiChatService.getAllSessions();
         
-        if (allSessions.length > 0) {
+        if (allSessions && allSessions.length > 0) {
           // 找到创建时间最新的活跃会话
           const latestSession = allSessions[0];
           setSessions(allSessions);
@@ -82,8 +82,12 @@ const MobileChat: React.FC = () => {
             setCurrentSessionId(latestSession.id);
             setSessionTitle(latestSession.title || "未命名会话");
             console.log("自动加载最新会话:", latestSession.title);
+            
+            // 确保滚动到最新消息
+            setTimeout(() => scrollToBottom(0), 300);
           } catch (sessionError) {
             console.error("加载会话失败:", sessionError);
+            message.error("加载最新会话失败，已创建新对话");
             setSessionTitle("新对话");
             setMessages([]);
             setCurrentSessionId("");
@@ -95,6 +99,7 @@ const MobileChat: React.FC = () => {
         }
       } catch (error) {
         console.error("自动加载会话失败:", error);
+        message.error("加载会话列表失败");
       } finally {
         setLoading(false);
       }
@@ -352,6 +357,16 @@ const MobileChat: React.FC = () => {
     setSessionTitle("新对话");
     setShowSessions(false);
     setShowMenu(false);
+    
+    // 重新获取会话列表以确保显示最新状态
+    try {
+      const allSessions = await aiChatService.getAllSessions();
+      if (allSessions && allSessions.length > 0) {
+        setSessions(allSessions);
+      }
+    } catch (error) {
+      console.error("获取会话列表失败:", error);
+    }
   };
 
   // 删除会话
@@ -491,12 +506,6 @@ const MobileChat: React.FC = () => {
       label: '查看历史会话',
       icon: <HistoryOutlined />,
       onClick: showSessionHistory
-    },
-    {
-      key: 'upload',
-      label: '上传文档',
-      icon: <FileTextOutlined />,
-      onClick: () => setUploadVisible(true)
     }
   ];
 

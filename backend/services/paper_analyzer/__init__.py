@@ -682,8 +682,62 @@ class PaperAnalyzerService:
                 print(f"Error getting message history: {str(history_error)}")
                 context_history = ""  # 使用空历史
             
-            # 生成回答 - 此处是计算密集型操作，不在事务中进行
-            # [保留现有的AI响应生成代码]...
+            # 根据会话类型选择处理模式
+            if session.session_type == "general":
+                # 通用聊天模式
+                print(f"非文档模式对话: {session_id}")
+                # 将历史消息转换为chat_without_context需要的格式
+                chat_history = []
+                for msg in history_messages[-8:]:
+                    chat_history.append({
+                        "role": "user" if msg.role == "user" else "assistant",
+                        "content": msg.content
+                    })
+                
+                response = await self.ai_manager.chat_without_context(
+                    message=message,
+                    history=chat_history  # 传递结构化的历史记录
+                )
+            else:
+                # 文档相关聊天模式 - 使用原有逻辑
+                retrieval_context = None
+                if session.paper_id:
+                    # 单文档模式
+                    paper_id = str(session.paper_id)
+                    retrieval_context = await self.rag_retriever.get_relevant_context(
+                        question=message,
+                        paper_id=paper_id,
+                        history=context_history
+                    )
+                else:
+                    # 多文档模式
+                    paper_ids = []
+                    session_docs = self.db.query(SessionDocument).filter(
+                        SessionDocument.session_id == uuid.UUID(session_id)
+                    ).all()
+                    
+                    for doc in session_docs:
+                        paper_ids.append(str(doc.paper_id))
+                    
+                    if paper_ids:
+                        if len(paper_ids) > 1:
+                            retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
+                                question=message,
+                                paper_ids=paper_ids,
+                                history=context_history
+                            )
+                        else:
+                            retrieval_context = await self.rag_retriever.get_relevant_context(
+                                question=message,
+                                paper_id=paper_ids[0],
+                                history=context_history
+                            )
+                
+                response = await self.ai_manager.get_response(
+                    question=message,
+                    context=retrieval_context,
+                    history=context_history
+                )
             
         except Exception as process_error:
             print(f"Error in message processing: {str(process_error)}")
@@ -1264,32 +1318,82 @@ class PaperAnalyzerService:
                     ChatMessage.session_id == uuid.UUID(session_id)
                 ).order_by(ChatMessage.created_at.asc()).all()
                 
+                # 4. 准备两种格式的历史记录，无论会话类型如何
+                # 结构化格式(对通用查询)
+                chat_history = []
+                for msg in history_messages[-8:]:
+                    chat_history.append({
+                        "role": "user" if msg.role == "user" else "assistant",
+                        "content": msg.content
+                    })
+                
+                # 文本格式(对文档查询)
                 context_history = "\n".join([
                     f"{'User' if msg.role == 'user' else 'Assistant'}: {msg.content}"
                     for msg in history_messages[-8:]
                 ])
             except Exception as e:
                 print(f"Error getting history for streaming: {str(e)}")
+                chat_history = []
                 context_history = ""
             
-            # 4. 准备上下文
-            retrieval_context = None
-            if session.session_type == "document":
-                # 获取相关文档IDs
-                paper_ids = []
-                if session.paper_id:  # 向后兼容
-                    paper_ids.append(str(session.paper_id))
-                
-                # 从关联表获取多文档信息
+            # 5. 准备上下文和生成回答
+            full_response = {"answer": "", "sources": [], "confidence": 0.5, "reply": []}
+            chunks = []
+            
+            # 获取会话相关文档，判断是否有文档上下文
+            has_documents = False
+            paper_ids = []
+            if session.session_type != "general":
+                # 获取关联文档ID
                 session_docs = self.db.query(SessionDocument).filter(
                     SessionDocument.session_id == uuid.UUID(session_id)
-                ).order_by(SessionDocument.order).all()
+                ).all()
                 
                 for doc in session_docs:
-                    paper_id = str(doc.paper_id)
-                    if paper_id not in paper_ids:
-                        paper_ids.append(paper_id)
+                    paper_ids.append(str(doc.paper_id))
                 
+                has_documents = len(paper_ids) > 0
+            
+            # 分析问题意图，即使有文档也可能是通用查询
+            intent = await self.ai_manager.identify_intent(
+                question=message,
+                context=None,  # 这里传None是因为我们只是判断意图
+                has_documents=has_documents,
+                history=context_history
+            )
+            
+            print(f"流式回复意图识别: {intent} for message: {message[:30]}...")
+            
+            # 根据意图和会话类型综合判断处理方式
+            if intent == "GENERAL_QUERY" or session.session_type == "general":
+                # 通用聊天模式 - 不论是否有文档关联
+                print(f"使用通用聊天模式处理: {session_id}")
+                async for chunk in self.ai_manager.chat_without_context_stream(
+                    message=message,
+                    history=chat_history  # 现在无论会话类型如何，chat_history都已定义
+                ):
+                    # 更新完整响应
+                    if not chunk.get("error"):
+                        text = chunk.get("partial_response", "")
+                        full_response["answer"] += text
+                        chunks.append(text)
+                        
+                        # 转换为前端期望的格式
+                        yield {
+                            "id": f"stream_{len(chunks)}_{session_id}",
+                            "content": text,
+                            "done": chunk.get("done", False)
+                        }
+                    else:
+                        yield {
+                            "error": chunk.get("error"),
+                            "done": True
+                        }
+                        return
+            else:
+                # 文档相关模式 - 只有当意图是文档相关且有文档时
+                retrieval_context = None
                 if paper_ids:
                     if len(paper_ids) > 1:
                         retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
@@ -1303,38 +1407,32 @@ class PaperAnalyzerService:
                             paper_id=paper_ids[0],
                             history=context_history
                         )
+                
+                async for chunk in self.ai_manager.stream_response(
+                    question=message,
+                    context=retrieval_context,
+                    history=context_history
+                ):
+                    # 更新完整响应
+                    if not chunk.get("error"):
+                        text = chunk.get("partial_response", "")
+                        full_response["answer"] += text
+                        chunks.append(text)
+                        
+                        # 转换为前端期望的格式
+                        yield {
+                            "id": f"stream_{len(chunks)}_{session_id}",
+                            "content": text,
+                            "done": chunk.get("done", False)
+                        }
+                    else:
+                        yield {
+                            "error": chunk.get("error"),
+                            "done": True
+                        }
+                        return
             
-            # 5. 流式生成回答
-            full_response = {"answer": "", "sources": [], "confidence": 0.5, "reply": []}
-            
-            # 收集片段
-            chunks = []
-            async for chunk in self.ai_manager.stream_response(
-                question=message,
-                context=retrieval_context,
-                history=context_history
-            ):
-                # 更新完整响应
-                if not chunk.get("error"):
-                    text = chunk.get("partial_response", "")
-                    full_response["answer"] += text
-                    chunks.append(text)
-                    
-                    # 转换为前端期望的格式
-                    yield {
-                        "id": f"stream_{len(chunks)}_{session_id}",
-                        "content": text,
-                        "done": chunk.get("done", False)
-                    }
-                else:
-                    yield {
-                        "error": chunk.get("error"),
-                        "done": True
-                    }
-                    return
-            
-            # 6. 在流式传输完成后保存完整响应
-            # 使用_parse_response_content解析完整响应
+            # 5. 在流式传输完成后保存完整响应
             full_response["reply"] = self.ai_manager._parse_response_content(full_response["answer"])
             
             try:

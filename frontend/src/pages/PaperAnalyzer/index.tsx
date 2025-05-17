@@ -217,25 +217,45 @@ const PaperAnalyzer: React.FC = () => {
         // 5. 添加分析完成的消息并持久化到后端
         // 先添加到本地状态
         try {
-          // 直接发送消息
-          await paperAnalyzerApi.sendMessage(
-            sessionId, 
-            `文件 ${file.name} 已成功分析，可以开始提问了`
-          );
-          
-          // 分析成功后重新获取最新的消息列表
-          const result = await paperAnalyzerApi.getChatHistory(sessionId, 20);
-          
-          // 使用API返回的标准格式消息更新状态
-          if (result && result.messages && Array.isArray(result.messages)) {
-            setResponses(result.messages);
-            setHasMoreMessages(result.has_more || false);
-            if (result.messages.length > 0) {
-              setLastMessageId(result.messages[0].id || null);
+          // 使用流式API发送消息
+          await paperAnalyzerApi.streamMessage(
+            sessionId,
+            `文件 ${file.name} 已成功分析，可以开始提问了`,
+            {
+              onChunk: (chunk) => {
+                if (chunk.delta) {
+                  setStreamingState(prev => ({
+                    isStreaming: true,
+                    partialMessage: prev.partialMessage + chunk.delta,
+                    messageId: chunk.message_id || prev.messageId
+                  }));
+                  scrollToBottom();
+                }
+              },
+              onComplete: async () => {
+                // 重新获取消息历史
+                const result = await paperAnalyzerApi.getChatHistory(sessionId, 20);
+                if (result && result.messages && Array.isArray(result.messages)) {
+                  setResponses(result.messages);
+                  setHasMoreMessages(result.has_more || false);
+                  if (result.messages.length > 0) {
+                    setLastMessageId(result.messages[0].id || null);
+                  }
+                }
+              },
+              onError: (error) => {
+                console.error("保存分析完成消息失败:", error);
+              }
             }
-          }
-        } catch (msgError) {
-          console.error("保存分析完成消息失败:", msgError);
+          );
+        } catch (error) {
+          console.error("发送消息失败:", error);
+          message.error('提问失败');
+          setStreamingState({
+            isStreaming: false,
+            partialMessage: ''
+          });
+          setSending(false);
         }
       } else {
         message.error(result.message || '文档分析失败');
