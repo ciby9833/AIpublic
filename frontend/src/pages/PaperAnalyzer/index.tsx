@@ -34,6 +34,7 @@ import { Modal, Drawer, Empty, Popover, Input as AntInput } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import mermaid from 'mermaid';
 import { useNavigate } from 'react-router-dom';
+import { authApi } from '../../services/auth';
 
 const { TextArea } = Input;
 const { Sider, Content } = Layout;
@@ -116,11 +117,47 @@ const PaperAnalyzer: React.FC = () => {
     return () => window.removeEventListener('resize', checkDeviceAndRedirect);
   }, [navigate]);
 
-  // 修改滚动到底部函数，使其更加可靠
+  // 在组件顶部import附近添加
+  useEffect(() => {
+    const checkAuthStatus = () => {
+      const accessToken = localStorage.getItem('access_token');
+      const expiresAt = localStorage.getItem('expires_at');
+      
+      if (!accessToken || !expiresAt) {
+        console.log('无有效登录信息，将退出登录');
+        message.error('登录已过期，请重新登录');
+        authApi.logout();
+        return;
+      }
+      
+      const now = Date.now() / 1000;
+      const expiresTime = Number(expiresAt);
+      
+      if (now >= expiresTime) {
+        console.log('登录已过期，将退出登录');
+        message.error('登录已过期，请重新登录');
+        authApi.logout();
+      }
+    };
+    
+    // 初始检查
+    checkAuthStatus();
+    
+    // 设置定期检查 (每分钟检查一次)
+    const interval = setInterval(checkAuthStatus, 60000);
+    
+    return () => clearInterval(interval);
+  }, [navigate]);
+
+  // 1. 首先改进scrollToBottom函数，使其更可靠
   const scrollToBottom = (delay = 100) => {
     setTimeout(() => {
       if (chatMessagesRef.current) {
-        chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
+        const scrollHeight = chatMessagesRef.current.scrollHeight;
+        const height = chatMessagesRef.current.clientHeight;
+        const maxScrollTop = scrollHeight - height;
+        chatMessagesRef.current.scrollTop = maxScrollTop > 0 ? maxScrollTop : 0;
+        console.log('Scrolling to bottom:', maxScrollTop);
       }
     }, delay);
   };
@@ -312,7 +349,7 @@ const PaperAnalyzer: React.FC = () => {
     }
   };
 
-  // 处理提问
+  // 2. 在handleAsk函数中发送消息后立即滚动
   const handleAsk = async () => {
     if (!question.trim() && !selectedFile) {
       message.warning('请输入问题或上传文件');
@@ -338,6 +375,8 @@ const PaperAnalyzer: React.FC = () => {
       
       // Set sending state to disable send button
       setSending(true);
+      // 强制滚动到底部显示思考状态
+      scrollToBottom(10); // 更短的延迟确保快速响应
       
       // If no session ID exists, create a session first
       let sessionId = currentSessionId;
@@ -1088,6 +1127,25 @@ const PaperAnalyzer: React.FC = () => {
       };
     }
   }, [handleChatScroll]);
+
+  // 3. 添加专门监听sending和analyzing状态变化的useEffect
+  useEffect(() => {
+    if (sending || analyzing) {
+      // 当进入思考或分析状态时滚动到底部
+      scrollToBottom(10);
+      
+      // 设置一个额外的定时器以确保在DOM更新后滚动
+      const timer = setTimeout(() => scrollToBottom(100), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [sending, analyzing]);
+
+  // 4. 在streamingState变化时也触发滚动
+  useEffect(() => {
+    if (streamingState.isStreaming) {
+      scrollToBottom(10);
+    }
+  }, [streamingState]);
 
   return (
     <Layout className="paper-analyzer-layout">

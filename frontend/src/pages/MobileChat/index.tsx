@@ -20,6 +20,7 @@ import { ApiChatMessage, ChatSession, StreamingState } from '../../types/chat';
 import { MessagesResponse } from '../../services/aiChatService';
 import ReactMarkdown from 'react-markdown';
 import './mobileChat.css';
+import { authApi } from '../../services/auth';
 
 const { TextArea } = Input;
 
@@ -46,6 +47,7 @@ const MobileChat: React.FC = () => {
     isStreaming: false,
     partialMessage: ''
   });
+  const [isComposing, setIsComposing] = useState(false);
 
   // 页面加载时获取最新的会话
   useEffect(() => {
@@ -111,6 +113,9 @@ const MobileChat: React.FC = () => {
     const userMessage = messageText;
     setMessageText('');
     setSending(true);
+    
+    // 立即滚动到底部显示思考状态
+    scrollToBottom(10);
 
     try {
       // 如果没有会话ID，先创建会话
@@ -452,6 +457,75 @@ const MobileChat: React.FC = () => {
     return () => window.removeEventListener('resize', checkDeviceAndRedirect);
   }, [navigate]);
 
+  useEffect(() => {
+    const checkAuthStatus = () => {
+      const accessToken = localStorage.getItem('access_token');
+      const expiresAt = localStorage.getItem('expires_at');
+      
+      if (!accessToken || !expiresAt) {
+        handleGracefulLogout('登录信息已失效，请重新登录');
+        return;
+      }
+      
+      const now = Date.now() / 1000;
+      const expiresTime = Number(expiresAt);
+      
+      // 提前5分钟检测到过期，给用户友好提示
+      if (now >= expiresTime - 300) { // 5分钟预警
+        handleGracefulLogout('登录即将过期，请保存重要内容');
+      }
+    };
+    
+    // 初始检查
+    checkAuthStatus();
+    
+    // 设置定期检查 (每分钟检查一次)
+    const interval = setInterval(checkAuthStatus, 60000);
+    
+    return () => clearInterval(interval);
+  }, [navigate]);
+
+  // 添加平滑退出函数
+  const handleGracefulLogout = (msg: string) => {
+    // 保存当前输入内容到localStorage
+    if (messageText) {
+      localStorage.setItem('draft_message', messageText);
+    }
+    
+    // 使用modal而不是message，确保用户看到
+    Modal.warning({
+      title: '登录状态提示',
+      content: msg,
+      okText: '确定',
+      onOk: () => {
+        authApi.logout();
+      }
+    });
+    
+    // 5秒后自动登出
+    setTimeout(() => {
+      authApi.logout();
+    }, 5000);
+  };
+
+  // 监听发送状态变化，确保滚动到底部
+  useEffect(() => {
+    if (sending) {
+      scrollToBottom(10);
+      
+      // 设置额外定时器确保DOM更新后滚动
+      const timer = setTimeout(() => scrollToBottom(100), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [sending]);
+
+  // 监听流式状态变化，确保滚动到底部
+  useEffect(() => {
+    if (streamingState.isStreaming) {
+      scrollToBottom(10);
+    }
+  }, [streamingState]);
+
   return (
     <div className="x-chat-container">
       {/* 头部导航区 */}
@@ -657,8 +731,10 @@ const MobileChat: React.FC = () => {
               onChange={(e) => setMessageText(e.target.value)}
               placeholder="输入消息..."
               autoSize={{ minRows: 1, maxRows: 4 }}
-              onPressEnter={(e) => {
-                if (!e.shiftKey) {
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !isComposing && !sending) {
                   e.preventDefault();
                   handleSendMessage();
                 }
