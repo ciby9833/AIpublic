@@ -17,22 +17,17 @@ import {
   CloseCircleOutlined,
   CheckCircleOutlined,
   MessageOutlined,
-  UserOutlined,
   PlusOutlined,
   EditOutlined,
-  HistoryOutlined,
-  RobotOutlined
+  HistoryOutlined
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { paperAnalyzerApi } from '../../services/paperAnalyzer';
 import './styles.css';
 import type { MenuProps } from 'antd';
 import ChatMessage from './components/index';
-import { ChatMessage as ChatMessageType, ChatSession, StreamingState } from '../../types/chat';
-import { List as VirtualList, AutoSizer, ListRowProps } from 'react-virtualized';
-import { throttle } from 'lodash';
+import { ApiChatMessage as ChatMessageType, ChatSession, StreamingState } from '../../types/chat';
 import { Modal, Drawer, Empty, Popover, Input as AntInput } from 'antd';
-import ReactMarkdown from 'react-markdown';
-import mermaid from 'mermaid';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../../services/auth';
 
@@ -52,6 +47,7 @@ interface LineMapping {
 }
 
 const PaperAnalyzer: React.FC = () => {
+  const { t } = useTranslation();
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [responses, setResponses] = useState<ChatMessageType[]>([]);
@@ -76,9 +72,6 @@ const PaperAnalyzer: React.FC = () => {
   const [isResizing, setIsResizing] = useState(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
-  const [mobileView, setMobileView] = useState<'chat' | 'document'>('document');
-  const [activeMobileDocView, setActiveMobileDocView] = useState<'original' | 'translated'>('original');
-  const [isMobileCollapsed, setIsMobileCollapsed] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [showSessions, setShowSessions] = useState<boolean>(false);
@@ -98,7 +91,7 @@ const PaperAnalyzer: React.FC = () => {
   });
   const [isComposing, setIsComposing] = useState(false);
 
-  // 检测是否为移动设备
+  // 检测是否为移动设备并重定向
   useEffect(() => {
     const checkDeviceAndRedirect = () => {
       const isMobile = window.innerWidth <= 768;
@@ -107,17 +100,13 @@ const PaperAnalyzer: React.FC = () => {
       }
     };
     
-    // 首次检查
     checkDeviceAndRedirect();
-    
-    // 监听窗口大小变化
     window.addEventListener('resize', checkDeviceAndRedirect);
     
-    // 清理监听器
     return () => window.removeEventListener('resize', checkDeviceAndRedirect);
   }, [navigate]);
 
-  // 在组件顶部import附近添加
+  // 检查登录状态
   useEffect(() => {
     const checkAuthStatus = () => {
       const accessToken = localStorage.getItem('access_token');
@@ -125,7 +114,7 @@ const PaperAnalyzer: React.FC = () => {
       
       if (!accessToken || !expiresAt) {
         console.log('无有效登录信息，将退出登录');
-        message.error('登录已过期，请重新登录');
+        message.error(t('paperAnalyzer.loginExpired'));
         authApi.logout();
         return;
       }
@@ -135,15 +124,12 @@ const PaperAnalyzer: React.FC = () => {
       
       if (now >= expiresTime) {
         console.log('登录已过期，将退出登录');
-        message.error('登录已过期，请重新登录');
+        message.error(t('paperAnalyzer.loginExpired'));
         authApi.logout();
       }
     };
     
-    // 初始检查
     checkAuthStatus();
-    
-    // 设置定期检查 (每分钟检查一次)
     const interval = setInterval(checkAuthStatus, 60000);
     
     return () => clearInterval(interval);
@@ -184,26 +170,21 @@ const PaperAnalyzer: React.FC = () => {
       setLoading(true);
       setSelectedFile(file);
       
-      // 1. 先添加本地状态消息（保持现有体验）
-      setResponses(prev => [...prev, {
-        question: `正在分析文件: ${file.name}`,
-        answer: '请耐心等待，正在处理中...',
-        timestamp: new Date().toISOString()
-      }]);
+      // 1. 文件上传不需要添加临时消息，通过正常的流式API处理
 
       // 2. 确保有会话ID
       let sessionId = currentSessionId;
       if (!sessionId) {
-        const sessionTitle = `关于 ${file.name} 的对话`;
+        const sessionTitle = `${t('paperAnalyzer.documentSession')} ${file.name}`;
         try {
           const session = await handleCreateSession(sessionTitle);
           if (!session || !session.id) {
-            throw new Error('创建会话失败');
+            throw new Error(t('paperAnalyzer.createSessionFailed'));
           }
           sessionId = session.id;
         } catch (error) {
           console.error("创建会话失败:", error);
-          message.error('创建会话失败');
+          message.error(t('paperAnalyzer.createSessionFailed'));
           setAnalyzing(false);
           setLoading(false);
           return;
@@ -225,7 +206,7 @@ const PaperAnalyzer: React.FC = () => {
           setLineMapping(contentData.line_mapping || {});
           setTotalLines(contentData.total_lines || 0);
         }
-        message.success('文档分析完成');
+        message.success(t('paperAnalyzer.documentAnalysisComplete'));
         
         // 4. 处理文档添加到会话
         const wasAddedToSession = result && 'added_to_session' in result 
@@ -255,22 +236,22 @@ const PaperAnalyzer: React.FC = () => {
             
             if (error.message && error.message.includes("一个会话最多支持10个文档")) {
               message.error({
-                content: '当前会话文档数量已达到上限（10个），请创建新会话继续添加文档',
+                content: t('paperAnalyzer.sessionDocumentLimitReached'),
                 duration: 5
               });
               
               Modal.confirm({
-                title: '文档数量已达到上限',
-                content: '当前会话已包含10个文档，是否创建一个新会话？',
-                okText: '创建新会话',
-                cancelText: '取消',
+                title: t('paperAnalyzer.documentLimitTitle'),
+                content: t('paperAnalyzer.documentLimitContent'),
+                okText: t('paperAnalyzer.createNewSession'),
+                cancelText: t('paperAnalyzer.cancel'),
                 onOk: async () => {
                   await handleNewChat();
                   // 安全地处理异步操作
                 }
               });
             } else {
-              message.error('添加文档到会话失败');
+              message.error(t('paperAnalyzer.addDocumentFailed'));
             }
           }
         } else if (wasAddedToSession) {
@@ -284,7 +265,7 @@ const PaperAnalyzer: React.FC = () => {
           // 使用流式API发送消息
           await paperAnalyzerApi.streamMessage(
             sessionId,
-            `文件 ${file.name} 已成功分析，可以开始提问了`,
+            t('paperAnalyzer.fileAnalysisComplete', { filename: file.name }),
             {
               onChunk: (chunk) => {
                 if (chunk.delta) {
@@ -321,28 +302,28 @@ const PaperAnalyzer: React.FC = () => {
           });
           setSending(false);
         }
-      } else {
-        message.error(result.message || '文档分析失败');
-      }
-    } catch (error: any) {
-      console.error('Analysis error:', error);
-      
-      if (error.message && error.message.includes("一个会话最多支持10个文档")) {
-        message.error({
-          content: '当前会话文档数量已达到上限（10个），请创建新会话继续添加文档',
-          duration: 5
-        });
+              } else {
+          message.error(result.message || t('paperAnalyzer.documentAnalysisFailed'));
+        }
+      } catch (error: any) {
+        console.error('Analysis error:', error);
         
-        Modal.confirm({
-          title: '文档数量已达到上限',
-          content: '当前会话已包含10个文档，是否创建一个新会话？',
-          okText: '创建新会话',
-          cancelText: '取消',
-          onOk: handleNewChat
-        });
-      } else {
-        message.error('文档分析失败');
-      }
+        if (error.message && error.message.includes("一个会话最多支持10个文档")) {
+          message.error({
+            content: t('paperAnalyzer.sessionDocumentLimitReached'),
+            duration: 5
+          });
+          
+          Modal.confirm({
+            title: t('paperAnalyzer.documentLimitTitle'),
+            content: t('paperAnalyzer.documentLimitContent'),
+            okText: t('paperAnalyzer.createNewSession'),
+            cancelText: t('paperAnalyzer.cancel'),
+            onOk: handleNewChat
+          });
+        } else {
+          message.error(t('paperAnalyzer.documentAnalysisFailed'));
+        }
     } finally {
       setAnalyzing(false);
       setLoading(false);
@@ -352,7 +333,7 @@ const PaperAnalyzer: React.FC = () => {
   // 2. 在handleAsk函数中发送消息后立即滚动
   const handleAsk = async () => {
     if (!question.trim() && !selectedFile) {
-      message.warning('请输入问题或上传文件');
+      message.warning(t('paperAnalyzer.questionRequired'));
       return;
     }
 
@@ -383,13 +364,13 @@ const PaperAnalyzer: React.FC = () => {
       if (!sessionId) {
         try {
           const sessionTitle = selectedFile 
-            ? `关于 ${selectedFile.name} 的对话`
-            : `AI 对话 ${new Date().toLocaleString('zh-CN')}`;
+            ? `${t('paperAnalyzer.documentSession')} ${selectedFile.name}`
+            : `${t('paperAnalyzer.aiOnlySession')} ${new Date().toLocaleString()}`;
           
           const session = await handleCreateSession(sessionTitle);
           
           if (!session || !session.id) {
-            message.error('创建对话失败');
+            message.error(t('paperAnalyzer.createSessionFailed'));
             setSending(false);
             return;
           }
@@ -398,20 +379,31 @@ const PaperAnalyzer: React.FC = () => {
           setCurrentSessionId(sessionId);
         } catch (error) {
           console.error("创建会话失败:", error);
-          message.error('创建对话失败');
+          message.error(t('paperAnalyzer.createSessionFailed'));
           setSending(false);
           return;
         }
       }
       
       try {
-        // Start streaming state
+        // 1. 立即添加用户消息到消息列表
+        const userMessage: ChatMessageType = {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: questionText,
+          created_at: new Date().toISOString()
+        };
+        
+        setResponses(prev => [...prev, userMessage]);
+        scrollToBottom(10);
+        
+        // 2. Start streaming state for AI response
         setStreamingState({
           isStreaming: true,
           partialMessage: ''
         });
         
-        // Use streaming API
+        // 3. Use streaming API
         await paperAnalyzerApi.streamMessage(
           sessionId,
           questionText,
@@ -449,7 +441,7 @@ const PaperAnalyzer: React.FC = () => {
             },
             onError: (error) => {
               console.error("消息流处理失败:", error);
-              message.error('消息处理失败');
+              message.error(t('paperAnalyzer.sendFailed'));
               setStreamingState({
                 isStreaming: false,
                 partialMessage: ''
@@ -460,7 +452,7 @@ const PaperAnalyzer: React.FC = () => {
         );
       } catch (error) {
         console.error("发送消息失败:", error);
-        message.error('提问失败');
+        message.error(t('paperAnalyzer.sendFailed'));
         setStreamingState({
           isStreaming: false,
           partialMessage: ''
@@ -469,7 +461,7 @@ const PaperAnalyzer: React.FC = () => {
       }
     } catch (error) {
       console.error("处理问题失败:", error);
-      message.error('处理失败');
+      message.error(t('paperAnalyzer.processingFailed'));
       setSending(false);
     }
   };
@@ -490,7 +482,7 @@ const PaperAnalyzer: React.FC = () => {
   // 处理翻译
   const handleTranslate = async () => {
     if (!currentPaperId || !selectedLanguage) {
-      message.warning('请选择目标语言');
+      message.warning(t('paperAnalyzer.selectTargetLanguage'));
       return;
     }
 
@@ -498,10 +490,10 @@ const PaperAnalyzer: React.FC = () => {
       setTranslationLoading(true);
       const translated = await paperAnalyzerApi.translatePaper(currentPaperId, selectedLanguage);
       setTranslatedContent(translated);
-      message.success('翻译完成');
+      message.success(t('paperAnalyzer.translationComplete'));
     } catch (error: any) {
       console.error('Translation error:', error);
-      message.error(error.message || '翻译失败');
+      message.error(error.message || t('paperAnalyzer.translationFailed'));
     } finally {
       setTranslationLoading(false);
     }
@@ -509,7 +501,7 @@ const PaperAnalyzer: React.FC = () => {
 
   const handleDownload = async (format: string) => {
     if (!translatedContent) {
-      message.warning('没有可下载的翻译内容');
+      message.warning(t('paperAnalyzer.noTranslationContent'));
       return;
     }
 
@@ -536,7 +528,7 @@ const PaperAnalyzer: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Download error:', error);
-      message.error('下载失败');
+      message.error(t('paperAnalyzer.downloadFailed'));
     }
   };
 
@@ -544,17 +536,17 @@ const PaperAnalyzer: React.FC = () => {
   const downloadMenuItems: MenuProps['items'] = [
     {
       key: 'docx',
-      label: 'Word 文档',
+      label: t('paperAnalyzer.wordDocument'),
       icon: <FileWordOutlined />,
     },
     {
       key: 'pdf',
-      label: 'PDF 文档',
+      label: t('paperAnalyzer.pdfDocument'),
       icon: <FilePdfOutlined />,
     },
     {
       key: 'md',
-      label: 'Markdown',
+      label: t('paperAnalyzer.markdown'),
       icon: <FileMarkdownOutlined />,
     },
   ];
@@ -631,56 +623,13 @@ const PaperAnalyzer: React.FC = () => {
     };
   }, [handleResizeMove, handleResizeEnd]);
 
-  // Add this function for handle bar interaction
-  const toggleMobileChat = () => {
-    setIsMobileCollapsed(!isMobileCollapsed);
-  };
-
-  // 改进移动端手势处理逻辑
-  useEffect(() => {
-    if (window.innerWidth > 768) return () => {}; // 确保始终返回清理函数
-    
-    let touchStartY = 0;
-    
-    const handleTouchStart = (e: React.TouchEvent | TouchEvent) => {
-      touchStartY = e.touches[0].clientY;
-    };
-    
-    const handleTouchMove = (e: React.TouchEvent | TouchEvent) => {
-      const touchY = e.touches[0].clientY;
-      const diff = touchStartY - touchY;
-      
-      // Swipe up - collapse chat
-      if (diff > 50 && !isMobileCollapsed) {
-        setIsMobileCollapsed(true);
-      } 
-      // Swipe down - expand chat
-      else if (diff < -50 && isMobileCollapsed) {
-        setIsMobileCollapsed(false);
-      }
-    };
-    
-    const chatHandle = document.querySelector('.chat-handle-bar');
-    if (!chatHandle) return () => {}; // 如果没有找到元素，也返回空函数
-    
-    // 使用显式类型转换解决TypeScript错误
-    chatHandle.addEventListener('touchstart', handleTouchStart as EventListener);
-    chatHandle.addEventListener('touchmove', handleTouchMove as EventListener);
-    
-    // 同样在清理函数中使用显式类型转换
-    return () => {
-      chatHandle.removeEventListener('touchstart', handleTouchStart as EventListener);
-      chatHandle.removeEventListener('touchmove', handleTouchMove as EventListener);
-    };
-  }, [isMobileCollapsed]);
-
   // Add this function to handle session creation
   const handleCreateSession = async (title?: string) => {
     try {
       setCreatingSession(true);
       
       // 确保title是有效的字符串
-      const finalTitle = title || `对话 ${new Date().toLocaleString('zh-CN')}`;
+      const finalTitle = title || `${t('paperAnalyzer.newChat')} ${new Date().toLocaleString()}`;
       
       // 如果当前已有会话ID且没有消息，则不创建新会话
       if (currentSessionId && responses.length === 0) {
@@ -722,11 +671,11 @@ const PaperAnalyzer: React.FC = () => {
         
         return session;
       } else {
-        throw new Error("创建会话失败: 无效的会话ID");
+        throw new Error(t('paperAnalyzer.createSessionFailed2'));
       }
     } catch (error) {
       console.error("创建会话失败:", error);
-      message.error('创建对话失败，请重试');
+      message.error(t('paperAnalyzer.createSessionFailed'));
       return null;
     } finally {
       setCreatingSession(false);
@@ -746,14 +695,14 @@ const PaperAnalyzer: React.FC = () => {
         setSessions(sessionList);
       } else {
         console.error('Invalid session list format:', sessionList);
-        message.error('获取对话历史格式错误');
+        message.error(t('paperAnalyzer.loadSessionFailed'));
       }
       
       setShowSessions(true);
       console.log("显示会话历史，当前会话数:", sessionList.length);
     } catch (error) {
       console.error("获取会话历史失败:", error);
-      message.error('获取会话历史失败');
+      message.error(t('paperAnalyzer.loadSessionFailed'));
     } finally {
       setLoading(false);
     }
@@ -770,11 +719,11 @@ const PaperAnalyzer: React.FC = () => {
         setSessions(sessionList);
       } else {
         console.error('Invalid session list format:', sessionList);
-        message.error('获取对话历史格式错误');
+        message.error(t('paperAnalyzer.loadSessionFailed'));
       }
     } catch (error) {
       console.error('Failed to fetch sessions:', error);
-      message.error('获取对话历史失败');
+      message.error(t('paperAnalyzer.loadSessionFailed'));
       throw error; // 重新抛出错误以便调用者处理
     }
   };
@@ -823,7 +772,7 @@ const PaperAnalyzer: React.FC = () => {
       // 更新sessionTitle
       const currentSession = sessions.find(s => s.id === sessionId);
       if (currentSession) {
-        setSessionTitle(currentSession.title || '无标题会话');
+        setSessionTitle(currentSession.title || t('paperAnalyzer.unnamedSession'));
       }
       
       // 设置消息内容 - 使用标准格式
@@ -857,7 +806,7 @@ const PaperAnalyzer: React.FC = () => {
       
     } catch (error) {
       console.error('加载对话历史失败:', error);
-      message.error('加载对话历史失败');
+      message.error(t('paperAnalyzer.loadSessionFailed'));
     } finally {
       setLoading(false);
     }
@@ -903,25 +852,25 @@ const PaperAnalyzer: React.FC = () => {
                 setLastMessageId(result.messages.length > 0 ? result.messages[0].id : null);
                 
                 setCurrentSessionId(latestSession.id);
-                setSessionTitle(latestSession.title || "未命名会话");
+                setSessionTitle(latestSession.title || t('paperAnalyzer.unnamedSession'));
                 console.log("自动加载最新会话:", latestSession.title);
               } catch (sessionError) {
                 console.error("加载会话失败:", sessionError);
                 // 如果加载失败，创建一个空状态
-                setSessionTitle("新对话");
+                setSessionTitle(t('paperAnalyzer.newChat'));
                 setResponses([]);
                 setCurrentSessionId("");
               }
             } else {
               // 如果没有会话，创建一个新的空会话状态
-              setSessionTitle("新对话");
+              setSessionTitle(t('paperAnalyzer.newChat'));
               setResponses([]);
               setCurrentSessionId("");
             }
           } catch (error) {
             console.error("加载会话数据失败:", error);
             // 创建一个空状态
-            setSessionTitle("新对话");
+            setSessionTitle(t('paperAnalyzer.newChat'));
             setResponses([]);
             setCurrentSessionId("");
           }
@@ -950,15 +899,10 @@ const PaperAnalyzer: React.FC = () => {
       setLineMapping(contentData.line_mapping || {});
       setTotalLines(contentData.total_lines || contentData.content.split('\n').length);
       
-      // 如果是在移动视图，切换到文档视图
-      if (window.innerWidth <= 768) {
-        setMobileView('document');
-      }
-      
-      message.success(`已加载文档: ${filename}`);
+      message.success(t('paperAnalyzer.documentLoaded', { filename }));
     } catch (error) {
       console.error('加载文档失败:', error);
-      message.error('加载文档失败');
+      message.error(t('paperAnalyzer.loadDocumentFailed'));
     } finally {
       setLoading(false);
     }
@@ -983,7 +927,7 @@ const PaperAnalyzer: React.FC = () => {
       const result = await paperAnalyzerApi.updateSessionTitle(currentSessionId, sessionTitle);
       
       if (result.status === 'success') {
-        message.success('会话标题已更新');
+        message.success(t('paperAnalyzer.titleUpdated'));
         
         // 如果在会话列表中，也更新该会话的标题
         if (sessions.length > 0) {
@@ -997,7 +941,7 @@ const PaperAnalyzer: React.FC = () => {
       
       setEditingTitle(false);
     } catch (error: any) {
-      message.error(`保存标题失败: ${error.message}`);
+      message.error(t('paperAnalyzer.updateTitleFailed', { message: error.message }));
       console.error('保存标题失败:', error);
       setEditingTitle(false);
     }
@@ -1010,11 +954,11 @@ const PaperAnalyzer: React.FC = () => {
     
     // 弹窗确认
     Modal.confirm({
-      title: '确认删除',
-      content: '确定要删除这个对话吗？此操作不可恢复。',
-      okText: '删除',
+      title: t('paperAnalyzer.confirmDelete'),
+      content: t('paperAnalyzer.deleteConfirmText'),
+      okText: t('paperAnalyzer.delete'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('paperAnalyzer.cancel'),
       onOk: async () => {
         try {
           await paperAnalyzerApi.deleteSession(sessionId);
@@ -1026,13 +970,13 @@ const PaperAnalyzer: React.FC = () => {
           if (sessionId === currentSessionId) {
             setCurrentSessionId("");
             setResponses([]);
-            setSessionTitle("新对话");
+            setSessionTitle(t('paperAnalyzer.newChat'));
             setShowSessions(false);
           }
           
-          message.success('对话已删除');
+          message.success(t('paperAnalyzer.sessionDeleted'));
         } catch (error: any) {
-          message.error(`删除失败: ${error.message}`);
+          message.error(t('paperAnalyzer.deleteSessionFailed', { message: error.message }));
           console.error('删除对话失败:', error);
         }
       }
@@ -1050,7 +994,7 @@ const PaperAnalyzer: React.FC = () => {
     // 清除当前会话和消息
     setCurrentSessionId("");
     setResponses([]);
-    setSessionTitle("新对话");
+    setSessionTitle(t('paperAnalyzer.newChat'));
     setShowSessions(false);
     setSelectedFile(null);
     setCurrentPaperId("");
@@ -1100,7 +1044,7 @@ const PaperAnalyzer: React.FC = () => {
       }
     } catch (error) {
       console.error('加载更多消息失败:', error);
-      message.error('加载更多消息失败');
+      message.error(t('paperAnalyzer.loadingMoreMessages'));
     } finally {
       setIsLoadingMore(false);
     }
@@ -1165,7 +1109,7 @@ const PaperAnalyzer: React.FC = () => {
                   onClick={() => setShowSessions(false)}
                   icon={<LeftOutlined />}
                 >
-                  返回当前对话
+                  {t('paperAnalyzer.returnToChat')}
                 </Button>
                 {responses.length > 0 && (
               <Button
@@ -1177,7 +1121,7 @@ const PaperAnalyzer: React.FC = () => {
                 }}
                 loading={creatingSession}
               >
-                新对话
+                {t('paperAnalyzer.newChat')}
               </Button>
                 )}
             </div>
@@ -1198,18 +1142,18 @@ const PaperAnalyzer: React.FC = () => {
                         type="primary"
                         onClick={handleTitleSave}
                       >
-                        保存
+                        {t('paperAnalyzer.saveTitle')}
                       </Button>
                     </div>
                   ) : (
                     <>
                       <h3 className="session-title" onClick={() => setEditingTitle(true)}>
-                        {sessionTitle || "新对话"}
+                        {sessionTitle || t('paperAnalyzer.newChat')}
                         {currentSessionId && <EditOutlined className="edit-icon" />}
                       </h3>
                       <div className="session-actions">
                         {responses.length > 0 && (
-                          <Tooltip title="创建新对话">
+                          <Tooltip title={t('paperAnalyzer.createNewSession')}>
                             <Button
                               type="text"
                               icon={<PlusOutlined />}
@@ -1226,14 +1170,14 @@ const PaperAnalyzer: React.FC = () => {
                           type="text" 
                           icon={<HistoryOutlined />} 
                           onClick={showSessionHistory}
-                          title="历史对话"
+                          title={t('paperAnalyzer.chatHistory')}
                         />
                         <Button
                           type="text"
                           icon={collapsed ? <RightOutlined /> : <LeftOutlined />}
                           onClick={() => setCollapsed(!collapsed)}
                           className="collapse-button"
-                          title={collapsed ? "展开" : "收起"}
+                          title={collapsed ? t('paperAnalyzer.expand') : t('paperAnalyzer.collapse')}
                         />
                       </div>
                     </>
@@ -1246,7 +1190,7 @@ const PaperAnalyzer: React.FC = () => {
             <div className="sessions-list">
               {loading && (
                 <div className="sessions-list-loading">
-                  <Spin tip="加载历史对话..." />
+                  <Spin tip={t('paperAnalyzer.loadingChatHistory')} />
                 </div>
               )}
               {sessions.length > 0 ? (
@@ -1271,7 +1215,7 @@ const PaperAnalyzer: React.FC = () => {
                               minute: '2-digit'
                             })}
                           </span>
-                          <span className="session-count">{session.message_count}条消息</span>
+                          <span className="session-count">{t('paperAnalyzer.messagesCount', { count: session.message_count })}</span>
                           
                           {/* 添加删除按钮 */}
                           <Button
@@ -1279,7 +1223,7 @@ const PaperAnalyzer: React.FC = () => {
                             danger
                             icon={<DeleteOutlined />}
                             size="small"
-                            title="删除对话"
+                            title={t('paperAnalyzer.deleteSession')}
                             onClick={(e) => handleDeleteSession(session.id, e)}
                             className="delete-session-btn"
                           />
@@ -1311,14 +1255,14 @@ const PaperAnalyzer: React.FC = () => {
                   )}
                 />
               ) : (
-                !loading && <Empty description="暂无对话历史" />
+                !loading && <Empty description={t('paperAnalyzer.noSessionHistory')} />
               )}
             </div>
           ) : (
             <div className="chat-messages" ref={chatMessagesRef}>
               {isLoadingMore && (
                 <div className="loading-more-messages">
-                  <Spin size="small" /> 加载更多消息...
+                  <Spin size="small" /> {t('paperAnalyzer.loadingMoreMessages')}
                 </div>
               )}
               <List
@@ -1333,31 +1277,16 @@ const PaperAnalyzer: React.FC = () => {
                 )}
               />
               {streamingState.isStreaming && (
-                <div className="chat-message assistant">
-                  <div className="message-avatar">
-                    <RobotOutlined />
-                  </div>
-                  <div className="message-content">
-                    <ReactMarkdown>
-                      {streamingState.partialMessage || '...'}
-                    </ReactMarkdown>
-                  </div>
-                </div>
+                <ChatMessage 
+                  message={{
+                    id: `streaming-${Date.now()}`,
+                    role: 'assistant',
+                    content: streamingState.partialMessage || t('paperAnalyzer.thinking'),
+                    created_at: new Date().toISOString()
+                  }}
+                />
               )}
-              {sending && (
-                <div className="thinking-animation">
-                  <div className="chat-message">
-                    <div className="message-avatar">
-                      <RobotOutlined />
-                    </div>
-                    <div className="message-content">
-                      <div className="message-text loading">
-                        <span className="loading-dots">正在思考...</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* 移除重复的thinking状态，streamingState.isStreaming已经处理了思考状态 */}
             </div>
           )}
           
@@ -1370,7 +1299,7 @@ const PaperAnalyzer: React.FC = () => {
               <TextArea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder={showSessions ? "选择一个会话开始聊天" : analyzing ? "正在分析文档，请稍候..." : "请输入您的问题或拖拽文件到此处"}
+                placeholder={showSessions ? t('paperAnalyzer.inputPlaceholderSelectSession') : analyzing ? t('paperAnalyzer.inputPlaceholderAnalyzing') : t('paperAnalyzer.inputPlaceholder')}
                 rows={3}
                 disabled={analyzing || showSessions}
                 onCompositionStart={() => setIsComposing(true)}
@@ -1396,7 +1325,7 @@ const PaperAnalyzer: React.FC = () => {
                         }}
                         disabled={analyzing || showSessions}
                       >
-                        <Tooltip title={analyzing ? "正在分析中..." : "上传文件"}>
+                        <Tooltip title={analyzing ? t('paperAnalyzer.analyzing') : t('paperAnalyzer.uploadFile')}>
                           <Button 
                             icon={<PaperClipOutlined />} 
                             disabled={analyzing || showSessions}
@@ -1404,7 +1333,7 @@ const PaperAnalyzer: React.FC = () => {
                         </Tooltip>
                       </Upload>
                       {sessionDocuments.length > 0 && (
-                        <Tooltip title="查看会话文档">
+                        <Tooltip title={t('paperAnalyzer.viewSessionDocuments')}>
                           <Button
                             icon={<FileTextOutlined />}
                             onClick={toggleDocumentsList}
@@ -1425,7 +1354,7 @@ const PaperAnalyzer: React.FC = () => {
                     loading={sending || analyzing}
                     disabled={analyzing || showSessions}
               >
-                    {analyzing ? "分析中..." : "发送"}
+                    {analyzing ? t('paperAnalyzer.analyzing') : t('paperAnalyzer.send')}
               </Button>
                   )}
               </div>
@@ -1434,14 +1363,12 @@ const PaperAnalyzer: React.FC = () => {
         </div>
 
       {/* Add resize handle */}
-      {window.innerWidth > 768 && (
-        <div 
-          className="resize-handle"
-          onMouseDown={handleResizeStart}
-        >
-          <div className="handle-bar"></div>
-        </div>
-      )}
+      <div 
+        className="resize-handle"
+        onMouseDown={handleResizeStart}
+      >
+        <div className="handle-bar"></div>
+      </div>
     </Sider>
 
     <Content className="paper-analyzer-content">
@@ -1453,7 +1380,7 @@ const PaperAnalyzer: React.FC = () => {
           <div className="header-right">
             <Select
               style={{ width: 200 }}
-              placeholder="选择目标语言"
+              placeholder={t('paperAnalyzer.selectTargetLanguage')}
               value={selectedLanguage}
               onChange={setSelectedLanguage}
             >
@@ -1468,184 +1395,89 @@ const PaperAnalyzer: React.FC = () => {
               loading={translationLoading}
               disabled={!selectedLanguage}
             >
-              翻译
+              {t('paperAnalyzer.translate')}
             </Button>
           </div>
         </div>
-        {window.innerWidth <= 768 ? (
-          <div className="document-content-mobile">
-            <div className="mobile-doc-toggle">
-              <Button 
-                type={activeMobileDocView === 'original' ? 'primary' : 'default'}
-                onClick={() => setActiveMobileDocView('original')}
+        <div className="document-content-split">
+          <div className="original-content" ref={originalContentRef}>
+            <h3>{t('paperAnalyzer.originalText')}</h3>
+            {documentContent ? (
+              <div className="content-wrapper" 
+                style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
+                onScroll={handleOriginalScroll}
               >
-                Original
-              </Button>
-              <Button 
-                type={activeMobileDocView === 'translated' ? 'primary' : 'default'}
-                onClick={() => setActiveMobileDocView('translated')}
-              >
-                Translation
-              </Button>
-            </div>
-            <div className={`mobile-doc-container ${activeMobileDocView}`}>
-              {activeMobileDocView === 'original' ? (
-                <div className="original-content" ref={originalContentRef}>
-                  <h3>原文</h3>
-                  {documentContent ? (
-                    <div className="content-wrapper" 
-                      style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
-                      onScroll={handleOriginalScroll}
-                    >
-                      {documentContent.split('\n').map((line, index) => (
-                        <div key={index} className="line-container">
-                          <span className="line-number">{index + 1}</span>
-                          <span className="line-content">{line}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-document">
-                      <FileTextOutlined style={{ fontSize: '24px' }} />
-                      <p>请上传文档或等待分析完成</p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="translated-content" ref={translatedContentRef}>
-                  <div className="content-header">
-                    <h3>翻译</h3>
-                    <div className="header-actions">
-                      {translatedContent && (
-                        <>
-                          <Switch
-                            size="small"
-                            checked={syncScrolling}
-                            onChange={(checked) => setSyncScrolling(checked)}
-                            checkedChildren="同步滚动"
-                            unCheckedChildren="独立滚动"
-                          />
-                          <Dropdown
-                            menu={{
-                              items: downloadMenuItems,
-                              onClick: ({ key }) => handleDownload(key as string)
-                            }}
-                            trigger={['click']}
-                          >
-                            <Button 
-                              type="text" 
-                              icon={<DownloadOutlined />} 
-                              className="download-button"
-                              title="下载翻译"
-                            />
-                          </Dropdown>
-                        </>
-                      )}
-                    </div>
+                {documentContent.split('\n').map((line, index) => (
+                  <div key={index} className="line-container">
+                    <span className="line-number">{index + 1}</span>
+                    <span className="line-content">{line}</span>
                   </div>
-                  {translatedContent ? (
-                    <div className="content-wrapper" 
-                      style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
-                      onScroll={handleTranslatedScroll}
-                    >
-                      {translatedContent.split('\n').map((line, index) => (
-                        <div key={index} className="line-container">
-                          <span className="line-number">{index + 1}</span>
-                          <span className="line-content">{line}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-translation">
-                      <TranslationOutlined style={{ fontSize: '24px' }} />
-                      <p>请选择语言并点击翻译按钮</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="document-content-split">
-            <div className="original-content" ref={originalContentRef}>
-              <h3>原文</h3>
-              {documentContent ? (
-                <div className="content-wrapper" 
-                  style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
-                  onScroll={handleOriginalScroll}
-                >
-                  {documentContent.split('\n').map((line, index) => (
-                    <div key={index} className="line-container">
-                      <span className="line-number">{index + 1}</span>
-                      <span className="line-content">{line}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-document">
-                  <FileTextOutlined style={{ fontSize: '24px' }} />
-                  <p>请上传文档或等待分析完成</p>
-                </div>
-              )}
-            </div>
-            <div className="translated-content" ref={translatedContentRef}>
-              <div className="content-header">
-                <h3>翻译</h3>
-                <div className="header-actions">
-                  {translatedContent && (
-                    <>
-                      <Switch
-                        size="small"
-                        checked={syncScrolling}
-                        onChange={(checked) => setSyncScrolling(checked)}
-                        checkedChildren="同步滚动"
-                        unCheckedChildren="独立滚动"
-                      />
-                      <Dropdown
-                        menu={{
-                          items: downloadMenuItems,
-                          onClick: ({ key }) => handleDownload(key as string)
-                        }}
-                        trigger={['click']}
-                      >
-                        <Button 
-                          type="text" 
-                          icon={<DownloadOutlined />} 
-                          className="download-button"
-                          title="下载翻译"
-                        />
-                      </Dropdown>
-                    </>
-                  )}
-                </div>
+                ))}
               </div>
-              {translatedContent ? (
-                <div className="content-wrapper" 
-                  style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
-                  onScroll={handleTranslatedScroll}
-                >
-                  {translatedContent.split('\n').map((line, index) => (
-                    <div key={index} className="line-container">
-                      <span className="line-number">{index + 1}</span>
-                      <span className="line-content">{line}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-translation">
-                  <TranslationOutlined style={{ fontSize: '24px' }} />
-                  <p>请选择语言并点击翻译按钮</p>
-                </div>
-              )}
-            </div>
+            ) : (
+              <div className="empty-document">
+                <FileTextOutlined style={{ fontSize: '24px' }} />
+                <p>{t('paperAnalyzer.uploadDocumentPrompt')}</p>
+              </div>
+            )}
           </div>
-        )}
+          <div className="translated-content" ref={translatedContentRef}>
+            <div className="content-header">
+              <h3>{t('paperAnalyzer.translation')}</h3>
+              <div className="header-actions">
+                {translatedContent && (
+                  <>
+                    <Switch
+                      size="small"
+                      checked={syncScrolling}
+                      onChange={(checked) => setSyncScrolling(checked)}
+                      checkedChildren={t('paperAnalyzer.syncScrolling')}
+                      unCheckedChildren={t('paperAnalyzer.independentScrolling')}
+                    />
+                    <Dropdown
+                      menu={{
+                        items: downloadMenuItems,
+                        onClick: ({ key }) => handleDownload(key as string)
+                      }}
+                      trigger={['click']}
+                    >
+                      <Button 
+                        type="text" 
+                        icon={<DownloadOutlined />} 
+                        className="download-button"
+                        title={t('paperAnalyzer.downloadTranslation')}
+                      />
+                    </Dropdown>
+                  </>
+                )}
+              </div>
+            </div>
+            {translatedContent ? (
+              <div className="content-wrapper" 
+                style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
+                onScroll={handleTranslatedScroll}
+              >
+                {translatedContent.split('\n').map((line, index) => (
+                  <div key={index} className="line-container">
+                    <span className="line-number">{index + 1}</span>
+                    <span className="line-content">{line}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-translation">
+                <TranslationOutlined style={{ fontSize: '24px' }} />
+                <p>{t('paperAnalyzer.selectLanguagePrompt')}</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </Content>
 
     {/* Add documents list drawer right before the final Layout closing tag */}
     <Drawer
-      title="会话文档"
+      title={t('paperAnalyzer.sessionDocuments')}
       placement="right"
       open={showDocumentsList}
       onClose={toggleDocumentsList}
@@ -1685,7 +1517,7 @@ const PaperAnalyzer: React.FC = () => {
           )}
         />
       ) : (
-        <Empty description="当前会话没有文档" />
+        <Empty description={t('paperAnalyzer.noDocuments')} />
       )}
     </Drawer>
   </Layout>

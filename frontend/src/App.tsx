@@ -10,13 +10,13 @@ import Footer from './components/Footer'
 import { Tabs, Dropdown, Layout, Menu } from 'antd'
 import { GlossaryList, GlossaryEditor } from './components/GlossaryManager'
 import './style.css' 
-import { translateDocument } from './services/api'
+import { translateDocument, checkTranslationStatus, downloadTranslationResult } from './services/api'
 import GlossaryDatabaseSearch from './components/GlossaryManager/GlossaryDatabaseSearch'
 import { API_BASE_URL } from './config/env'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { AuthCallback } from './pages/AuthCallback'
 import { FeishuLogin } from './components/Auth/FeishuLogin'
-import { authApi } from './services/auth'
+import { authApi, tokenManager } from './services/auth'
 import type { MenuProps } from 'antd'
 import { 
   UserOutlined, 
@@ -32,6 +32,7 @@ import UserManagement from './pages/UserManagement'
 import DistanceCalculator from './pages/DistanceCalculator'
 import PaperAnalyzer from './pages/PaperAnalyzer'
 import MobileChat from './pages/MobileChat'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const { Header, Content, Sider } = Layout;
 
@@ -49,54 +50,34 @@ export type TranslationMode = 'text' | 'document';
 
 // 添加路由保护组件
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
-      const userInfo = localStorage.getItem('user_info');
-      const accessToken = localStorage.getItem('access_token');
-      const expiresAt = localStorage.getItem('expires_at');
-      
       console.log('Auth check:', {
-        hasUserInfo: !!userInfo,
-        hasAccessToken: !!accessToken,
-        hasExpiresAt: !!expiresAt,
+        isLoggedIn: tokenManager.isLoggedIn(),
+        isTokenExpired: tokenManager.isTokenExpired(),
+        isTokenExpiringSoon: tokenManager.isTokenExpiringSoon(),
         timestamp: new Date().toISOString()
       });
 
-      if (!userInfo || !accessToken || !expiresAt) {
-        console.log('Missing auth data, redirecting to login');
+      if (!tokenManager.isLoggedIn()) {
+        console.log('Not logged in, redirecting to login');
         navigate('/login', { replace: true });
         return;
       }
 
-      const now = Date.now() / 1000;
-      const expiresTime = Number(expiresAt);
-      
-      if (expiresTime - now < 3600) {
-        try {
-          const response = await fetch('/api/auth/refresh', {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`
-            }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            localStorage.setItem('expires_at', data.expires_at.toString());
-          }
-        } catch (error) {
-          console.error('Token refresh failed:', error);
+      // 如果token即将过期，尝试刷新
+      if (tokenManager.isTokenExpiringSoon()) {
+        console.log('Token expiring soon, attempting refresh');
+        const refreshed = await tokenManager.refreshToken();
+        if (!refreshed) {
+          console.log('Token refresh failed, redirecting to login');
+          navigate('/login', { replace: true });
+          return;
         }
-      }
-      
-      if (now >= expiresTime) {
-        localStorage.removeItem('user_info');
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('expires_at');
-        navigate('/login', { replace: true });
-        return;
       }
       
       setIsChecking(false);
@@ -108,7 +89,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   if (isChecking) {
     return (
       <div className="loading-container">
-        <div className="loading">加载中...</div>
+        <div className="loading">{t('loading')}</div>
       </div>
     );
   }
@@ -170,7 +151,7 @@ const AppLayout = () => {
     {
       key: '/paper-analyzer',
       icon: <FilePdfOutlined />,
-      label: t('tabs.paperAnalyzer', 'AI问答&翻译')
+      label: t('tabs.paperAnalyzer')
     },
     {
       key: '/translation',
@@ -180,7 +161,7 @@ const AppLayout = () => {
     {
       key: '/distance',
       icon: <CompassOutlined />,
-      label: t('tabs.distanceCalculator', '距离计算')
+      label: t('tabs.distanceCalculator')
     },
     {
       key: '/glossary',
@@ -325,16 +306,7 @@ const TranslationPage = () => {
         const maxRetries = 30;
 
         const checkStatus = async () => {
-            const response = await fetch(
-                `${API_BASE_URL}/api/translate/${document_id}/status`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    body: new URLSearchParams({ document_key })
-                }
-            );
+            const response = await checkTranslationStatus(document_id, document_key);
 
             if (!response.ok) {
                 throw new Error('Status check failed');
@@ -376,16 +348,7 @@ const TranslationPage = () => {
         }
 
         setStatus('downloading');
-        const downloadResponse = await fetch(
-            `${API_BASE_URL}/api/translate/${document_id}/result`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: new URLSearchParams({ document_key })
-            }
-        );
+        const downloadResponse = await downloadTranslationResult(document_id, document_key);
 
         if (!downloadResponse.ok) {
             const errorData = await downloadResponse.json();
@@ -520,18 +483,20 @@ const UserManagementPage = () => (
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<FeishuLogin />} />
-        <Route path="/auth/callback" element={<AuthCallback />} />
-        <Route path="/mobile-chat" element={<MobileChat />} />
-        <Route path="/*" element={
-          <ProtectedRoute>
-            <AppLayout />
-          </ProtectedRoute>
-        } />
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<FeishuLogin />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/mobile-chat" element={<MobileChat />} />
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <AppLayout />
+            </ProtectedRoute>
+          } />
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

@@ -3,11 +3,25 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    /* 使用动态视口高度，适配移动端键盘 */
+    height: 100dvh;
     width: 100%;
     background-color: #f5f7f9;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     overflow: hidden;
     position: relative;
+    /* 防止页面缩放 */
+    touch-action: manipulation;
+    /* 优化渲染性能 */
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* 确保主体区域正确布局 */
+  .x-chat-body {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
   
   /* 头部导航栏 */
@@ -258,6 +272,14 @@
     overflow-y: auto;
     padding: 16px;
     -webkit-overflow-scrolling: touch;
+    /* 确保滚动容器能够正确计算高度 */
+    position: relative;
+    /* 优化滚动性能 */
+    will-change: scroll-position;
+    /* 防止滚动时的回弹效果影响布局 */
+    overscroll-behavior: contain;
+    /* 确保消息容器占据可用空间 */
+    min-height: 0;
   }
   
   .x-messages-list {
@@ -327,13 +349,20 @@
     color: #1890ff;
   }
   
+  .x-message-content {
+    max-width: 85%;
+    display: flex;
+    flex-direction: column;
+  }
+
   .x-message-bubble {
     padding: 12px 16px;
-    border-radius: 18px;
-    position: relative;
-    max-width: calc(100% - 60px);
+    border-radius: 16px;
     background-color: #fff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    position: relative;
+    word-break: break-word;
+    overflow-wrap: break-word;
   }
   
   .x-user .x-message-bubble {
@@ -343,7 +372,7 @@
   }
   
   .x-assistant .x-message-bubble {
-    background-color: #f5f5f5;
+    background-color: #fff;
     border-bottom-left-radius: 4px;
   }
   
@@ -415,40 +444,333 @@
   }
   
   /* 输入区域 */
-  .x-chat-footer {
-    padding: 12px 16px;
+.x-chat-footer {
+  padding: 12px 16px;
+  background-color: #fff;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  /* 防止键盘弹出时被遮挡 */
+  position: relative;
+  z-index: 10;
+  /* 支持安全区域 */
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* 文件选择显示区域 */
+.x-selected-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f5f5f5;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.x-file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.x-file-name {
+  font-weight: 500;
+  color: #1890ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.x-file-size {
+  color: #999;
+  font-size: 12px;
+}
+
+.x-remove-file {
+  color: #999;
+  padding: 4px;
+}
+
+.x-input-container {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  /* 确保在键盘弹出时保持可见 */
+  min-height: 44px;
+}
+
+.x-input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+}
+
+.x-input {
+  flex: 1;
+  border-radius: 20px;
+  resize: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  padding: 10px 48px 10px 16px; /* 右侧留出空间给上传按钮 */
+  transition: all 0.3s;
+  /* 防止iOS自动缩放的关键设置 */
+  font-size: 16px !important;
+  line-height: 1.4;
+  /* 优化移动端输入体验 */
+  -webkit-appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  /* 防止输入时页面滚动 */
+  touch-action: manipulation;
+}
+
+.x-input:focus {
+  box-shadow: 0 2px 6px rgba(24, 144, 255, 0.15);
+  /* 防止焦点时的默认行为 */
+  outline: none;
+  border-color: #1890ff;
+}
+
+/* 针对iOS的特殊处理 */
+@supports (-webkit-touch-callout: none) {
+  .x-input {
+    /* iOS Safari专用优化 */
+    font-size: 16px !important;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+}
+
+.x-upload-button {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  border: none;
+  color: #666;
+  /* 优化触摸体验 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.x-upload-button:hover {
+  background-color: #f5f5f5;
+  color: #1890ff;
+}
+
+.x-upload-button:disabled {
+  color: #d9d9d9;
+  background-color: transparent;
+}
+
+.x-send-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 优化触摸体验 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+  
+  /* 键盘弹出时的适配 */
+  .x-chat-container.keyboard-open {
+    /* 使用视口高度，适应键盘弹出 */
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .x-chat-container.keyboard-open .x-chat-body {
+    /* 键盘弹出时，主体区域占据剩余空间 */
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .x-chat-container.keyboard-open .x-messages-container {
+    /* 键盘弹出时调整消息区域 */
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* 确保消息区域不会被输入框遮挡 */
+    margin-bottom: 0;
+    padding-bottom: 16px;
+  }
+  
+  .x-chat-container.keyboard-open .x-chat-footer {
+    /* 键盘弹出时输入框保持在底部，但不使用fixed定位 */
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
     background-color: #fff;
     border-top: 1px solid #f0f0f0;
-    flex-shrink: 0;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+    /* 确保输入框不会被键盘遮挡 */
+    transform: translateZ(0);
   }
   
-  .x-input-container {
+  /* 拖拽状态 */
+  .x-chat-container.drag-over {
+    background-color: #e6f7ff;
+    border: 2px dashed #1890ff;
+  }
+  
+  .x-chat-container.drag-over::after {
+    content: '拖拽文件到此处上传';
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(24, 144, 255, 0.9);
+    color: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    z-index: 1000;
+    pointer-events: none;
+  }
+  
+  .x-chat-container.keyboard-open .x-messages-container {
+    /* 键盘弹出时调整消息区域 */
+    padding-bottom: 8px;
+  }
+  
+  /* 输入框焦点状态 */
+  .x-input-focused {
+    /* 简化焦点状态，不使用固定定位 */
+    background-color: #fff;
+    border-top: 1px solid #f0f0f0;
+    transition: all 0.3s ease;
+  }
+  
+  /* 移动端优化 */
+  @media screen and (max-width: 768px) {
+    /* 确保在小屏幕上的最佳体验 */
+    .x-chat-container {
+      height: 100vh;
+      height: 100dvh;
+    }
+    
+    /* 优化触摸滚动 */
+    .x-messages-container,
+    .x-sessions-list {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    
+    /* 防止双击缩放 */
+    * {
+      touch-action: manipulation;
+    }
+    
+    /* 输入框在移动端的特殊处理 */
+    .x-input {
+      /* 确保字体大小足够大，防止iOS自动缩放 */
+      font-size: 16px !important;
+      /* 防止输入时页面滚动 */
+      position: relative;
+    }
+  }
+  
+  /* iOS特殊优化 */
+  @supports (-webkit-touch-callout: none) {
+    .x-chat-container {
+      /* iOS Safari的视口高度修正 */
+      height: -webkit-fill-available;
+    }
+    
+    .x-input {
+      /* iOS输入框优化 */
+      -webkit-appearance: none;
+      border-radius: 20px;
+      background-clip: padding-box;
+    }
+  }
+  
+  /* 复制按钮样式 */
+  .x-copy-button-container {
     display: flex;
-    align-items: flex-end;
-    gap: 12px;
+    justify-content: flex-start; /* 左对齐 */
+    margin-top: 4px; /* 在消息框外部，间距稍小 */
+    margin-bottom: 0;
+    opacity: 1; /* 移动端始终显示 */
+    padding-left: 0; /* 与消息框左对齐 */
   }
-  
-  .x-input {
-    flex: 1;
-    border-radius: 20px;
-    resize: none;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    padding: 10px 16px;
-    transition: all 0.3s;
-  }
-  
-  .x-input:focus {
-    box-shadow: 0 2px 6px rgba(24, 144, 255, 0.15);
-  }
-  
-  .x-send-button {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    padding: 0;
+
+  .x-copy-button {
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #d9d9d9;
+    padding: 4px 6px;
+    cursor: pointer;
+    color: #666;
     display: flex;
     align-items: center;
     justify-content: center;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+    font-size: 12px;
+    min-width: 28px;
+    height: 28px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    /* 优化触摸体验 */
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .x-copy-button:hover:not(:disabled) {
+    background-color: #f0f0f0;
+    color: #1890ff;
+    border-color: #1890ff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .x-copy-button:disabled {
+    background-color: #e8f5e9;
+    color: #52c41a;
+    border-color: #52c41a;
+    cursor: default;
+    transform: none;
+  }
+
+  .x-copy-button .anticon {
+    font-size: 12px;
+  }
+
+  /* 优化复制成功动画 */
+  @keyframes copySuccess {
+    0% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.2);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .x-copy-button .anticon-check {
+    color: #52c41a;
+    animation: copySuccess 0.5s ease;
   }
   
   /* 通用状态

@@ -1,5 +1,6 @@
 // frontend/src/services/paperAnalyzer.ts  文档阅读
 import { API_BASE_URL } from '../config/env';
+import { apiRequest } from './auth';
 import { 
   ChatResponse, 
   ChatMessage, 
@@ -75,15 +76,11 @@ export const paperAnalyzerApi = {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5分钟超时
 
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/analyze`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
           body: formData,
-          credentials: 'include',
           signal: controller.signal
         }
       );
@@ -135,14 +132,10 @@ export const paperAnalyzerApi = {
     }
 
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/${paperId}/content`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -161,16 +154,14 @@ export const paperAnalyzerApi = {
   // 提问
   askQuestion: async (question: string, paperId: string): Promise<QuestionResponse> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/ask`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ question, paper_id: paperId }),
-          credentials: 'include'
+          body: JSON.stringify({ question, paper_id: paperId })
         }
       );
 
@@ -189,14 +180,10 @@ export const paperAnalyzerApi = {
   // 获取问答历史
   getQuestionHistory: async (paperId: string): Promise<QuestionHistory[]> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/${paperId}/questions`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -216,14 +203,10 @@ export const paperAnalyzerApi = {
   // 获取支持的语言列表
   getSupportedLanguages: async (): Promise<Record<string, string>> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/supported-languages`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -243,15 +226,13 @@ export const paperAnalyzerApi = {
   // 翻译论文
   translatePaper: async (paperId: string, targetLang: string): Promise<string> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/${paperId}/translate`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          credentials: 'include',
           body: JSON.stringify(targetLang)  // 直接发送语言代码字符串
         }
       );
@@ -270,13 +251,11 @@ export const paperAnalyzerApi = {
   },
 
   async downloadTranslation(paperId: string, targetLang: string, format: string) {
-    const response = await fetch(`${API_BASE_URL}/api/paper/${paperId}/download`, {
+    const response = await apiRequest(`${API_BASE_URL}/api/paper/${paperId}/download`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         'Content-Type': 'application/json',
       },
-      credentials: 'include',
       body: JSON.stringify({ target_lang: targetLang, format }),
     });
     
@@ -291,14 +270,10 @@ export const paperAnalyzerApi = {
   // Get all chat sessions for a paper
   getChatSessions: async (paperId: string): Promise<ChatSession[]> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/${paperId}/chat-sessions`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -317,16 +292,14 @@ export const paperAnalyzerApi = {
   // Create a new chat session
   createChatSession: async (params: CreateSessionRequest): Promise<ChatSession> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(params),
-          credentials: 'include'
+          body: JSON.stringify(params)
         }
       );
 
@@ -370,12 +343,8 @@ export const paperAnalyzerApi = {
       }
 
       console.log(`[CHAT_API] Sending GET request to: ${url}`);
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        credentials: 'include',
+      const response = await apiRequest(url, {
+        method: 'GET'
       });
 
       if (!response.ok) {
@@ -396,14 +365,10 @@ export const paperAnalyzerApi = {
   // Get all chat sessions
   getAllChatSessions: async (): Promise<ChatSession[]> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -422,14 +387,10 @@ export const paperAnalyzerApi = {
   // Get a specific chat session
   getChatSession: async (sessionId: string): Promise<ChatSession> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -448,14 +409,10 @@ export const paperAnalyzerApi = {
   // 获取会话的文档
   getSessionDocuments: async (sessionId: string): Promise<any> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/documents`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -474,16 +431,14 @@ export const paperAnalyzerApi = {
   // 新增方法：向会话添加文档
   addDocumentToSession: async (sessionId: string, paperId: string): Promise<SessionDocument> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/documents`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ paper_id: paperId }),
-          credentials: 'include'
+          body: JSON.stringify({ paper_id: paperId })
         }
       );
 
@@ -503,14 +458,10 @@ export const paperAnalyzerApi = {
   // 新增方法：从会话移除文档
   removeDocumentFromSession: async (sessionId: string, documentId: string): Promise<any> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/documents/${documentId}`,
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'DELETE'
         }
       );
 
@@ -529,16 +480,14 @@ export const paperAnalyzerApi = {
   // 更新会话标题
   updateSessionTitle: async (sessionId: string, title: string): Promise<any> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/title`,
         {
           method: 'PATCH',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ title }),
-          credentials: 'include'
+          body: JSON.stringify({ title })
         }
       );
 
@@ -557,14 +506,10 @@ export const paperAnalyzerApi = {
   // 删除会话
   deleteSession: async (sessionId: string): Promise<any> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}`,
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'DELETE'
         }
       );
 
@@ -588,16 +533,14 @@ export const paperAnalyzerApi = {
   }) => {
     console.log(`[CHAT_API] Streaming message to session ${sessionId}, length: ${message.length} chars`);
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/stream`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ message }),
-          credentials: 'include'
+          body: JSON.stringify({ message })
         }
       );
 
@@ -636,10 +579,35 @@ export const paperAnalyzerApi = {
           if (jsonStr) {
             try {
               const jsonData = JSON.parse(jsonStr);
-              callbacks.onChunk(jsonData);
+              
+              // 转换后端格式到前端期望的格式
+              if (jsonData.content) {
+                // 流式内容块
+                callbacks.onChunk({
+                  delta: jsonData.content,
+                  done: jsonData.done || false,
+                  message_id: jsonData.message_id
+                });
+              } else if (jsonData.message_id && jsonData.saved) {
+                // 最终保存确认
+                finalResponse = jsonData;
+                callbacks.onChunk({
+                  delta: '',
+                  done: true,
+                  message_id: jsonData.message_id,
+                  saved: jsonData.saved
+                });
+              } else if (jsonData.error) {
+                // 错误处理
+                callbacks.onError(new Error(jsonData.error));
+                return;
+              } else {
+                // 其他数据直接传递
+                callbacks.onChunk(jsonData);
+              }
               
               // Save final response when receiving complete flag
-              if (jsonData.complete) {
+              if (jsonData.done || jsonData.saved) {
                 finalResponse = jsonData;
               }
             } catch (e) {
@@ -657,9 +625,30 @@ export const paperAnalyzerApi = {
       if (partialData.trim()) {
         try {
           const jsonData = JSON.parse(partialData.trim());
-          callbacks.onChunk(jsonData);
           
-          if (jsonData.complete) {
+          // 转换后端格式到前端期望的格式
+          if (jsonData.content) {
+            callbacks.onChunk({
+              delta: jsonData.content,
+              done: jsonData.done || false,
+              message_id: jsonData.message_id
+            });
+          } else if (jsonData.message_id && jsonData.saved) {
+            finalResponse = jsonData;
+            callbacks.onChunk({
+              delta: '',
+              done: true,
+              message_id: jsonData.message_id,
+              saved: jsonData.saved
+            });
+          } else if (jsonData.error) {
+            callbacks.onError(new Error(jsonData.error));
+            return;
+          } else {
+            callbacks.onChunk(jsonData);
+          }
+          
+          if (jsonData.done || jsonData.saved) {
             finalResponse = jsonData;
           }
         } catch (e) {

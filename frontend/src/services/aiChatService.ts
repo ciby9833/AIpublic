@@ -1,5 +1,6 @@
 // frontend/src/services/aiChatService.ts
 import { API_BASE_URL } from '../config/env';
+import { apiRequest } from './auth';
 import { 
   ChatResponse, 
   ChatMessage, 
@@ -46,15 +47,11 @@ export const aiChatService = {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5分钟超时
 
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/analyze`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
           body: formData,
-          credentials: 'include',
           signal: controller.signal
         }
       );
@@ -88,16 +85,14 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Creating new session with ${params.paper_ids?.length || 0} documents`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(params),
-          credentials: 'include'
+          body: JSON.stringify(params)
         }
       );
 
@@ -144,14 +139,10 @@ export const aiChatService = {
     try {
       console.log('[AI_CHAT] Fetching all sessions');
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -175,14 +166,10 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Fetching session details for id: ${sessionId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -206,16 +193,14 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Updating session ${sessionId} title to "${newTitle}"`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/title`,
         {
           method: 'PATCH',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ title: newTitle }),
-          credentials: 'include'
+          body: JSON.stringify({ title: newTitle })
         }
       );
 
@@ -239,14 +224,10 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Deleting session: ${sessionId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}`,
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'DELETE'
         }
       );
 
@@ -274,16 +255,14 @@ export const aiChatService = {
   }) => {
     console.log(`[AI_CHAT] Streaming message to session ${sessionId}, length: ${message.length} chars`);
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/stream`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ message }),
-          credentials: 'include'
+          body: JSON.stringify({ message })
         }
       );
 
@@ -377,16 +356,9 @@ export const aiChatService = {
         url += `&before_id=${beforeId}`;
       }
 
-      const response = await fetch(
-        url,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
-        }
-      );
+      const response = await apiRequest(url, {
+        method: 'GET'
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -409,16 +381,14 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Adding document ${paperId} to session ${sessionId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/documents`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ paper_id: paperId }),
-          credentials: 'include'
+          body: JSON.stringify({ paper_id: paperId })
         }
       );
 
@@ -446,14 +416,10 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Fetching documents for session ${sessionId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/documents`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -477,14 +443,10 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Removing document ${documentId} from session ${sessionId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/documents/${documentId}`,
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'DELETE'
         }
       );
 
@@ -509,16 +471,14 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Asking question to document ${paperId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/ask`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ question, paper_id: paperId }),
-          credentials: 'include'
+          body: JSON.stringify({ question, paper_id: paperId })
         }
       );
 
@@ -542,14 +502,10 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Fetching question history for document ${paperId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/${paperId}/questions`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -573,14 +529,10 @@ export const aiChatService = {
     try {
       console.log(`[AI_CHAT] Fetching document content for ${paperId}`);
       
-      const response = await fetch(
+      const response = await apiRequest(
         `${API_BASE_URL}/api/paper/${paperId}/content`,
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 

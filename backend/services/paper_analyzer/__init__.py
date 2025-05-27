@@ -682,44 +682,52 @@ class PaperAnalyzerService:
                 print(f"Error getting message history: {str(history_error)}")
                 context_history = ""  # 使用空历史
             
-            # 根据会话类型选择处理模式
-            if session.session_type == "general":
-                # 通用聊天模式
-                print(f"非文档模式对话: {session_id}")
-                # 将历史消息转换为chat_without_context需要的格式
-                chat_history = []
-                for msg in history_messages[-8:]:
-                    chat_history.append({
-                        "role": "user" if msg.role == "user" else "assistant",
-                        "content": msg.content
-                    })
+            # 获取会话相关文档
+            paper_ids = []
+            has_documents = False
+            if session.session_type != "general":
+                session_docs = self.db.query(SessionDocument).filter(
+                    SessionDocument.session_id == uuid.UUID(session_id)
+                ).all()
                 
+                for doc in session_docs:
+                    paper_ids.append(str(doc.paper_id))
+                
+                has_documents = len(paper_ids) > 0
+            
+            # 将历史消息转换为结构化格式
+            chat_history = []
+            for msg in history_messages[-8:]:
+                chat_history.append({
+                    "role": "user" if msg.role == "user" else "assistant",
+                    "content": msg.content
+                })
+            
+            # 智能识别用户意图
+            intent = await self.ai_manager.identify_intent(
+                question=message,
+                context=None,
+                has_documents=has_documents,
+                history=context_history
+            )
+            
+            print(f"非流式回复意图识别: {intent} for message: {message[:30]}...")
+            
+            # 根据意图选择处理模式
+            if intent == "GENERAL_QUERY":
+                # 通用查询模式
+                print(f"使用通用聊天模式处理: {session_id}")
                 response = await self.ai_manager.chat_without_context(
                     message=message,
-                    history=chat_history  # 传递结构化的历史记录
+                    history=chat_history
                 )
             else:
-                # 文档相关聊天模式 - 使用原有逻辑
+                # 文档相关查询模式
+                print(f"使用文档模式处理: {session_id}")
                 retrieval_context = None
-                if session.paper_id:
-                    # 单文档模式
-                    paper_id = str(session.paper_id)
-                    retrieval_context = await self.rag_retriever.get_relevant_context(
-                        question=message,
-                        paper_id=paper_id,
-                        history=context_history
-                    )
-                else:
-                    # 多文档模式
-                    paper_ids = []
-                    session_docs = self.db.query(SessionDocument).filter(
-                        SessionDocument.session_id == uuid.UUID(session_id)
-                    ).all()
-                    
-                    for doc in session_docs:
-                        paper_ids.append(str(doc.paper_id))
-                    
-                    if paper_ids:
+                
+                if paper_ids:
+                    try:
                         if len(paper_ids) > 1:
                             retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
                                 question=message,
@@ -732,12 +740,24 @@ class PaperAnalyzerService:
                                 paper_id=paper_ids[0],
                                 history=context_history
                             )
-                
-                response = await self.ai_manager.get_response(
-                    question=message,
-                    context=retrieval_context,
-                    history=context_history
-                )
+                    except Exception as context_error:
+                        print(f"获取文档上下文失败，降级为通用模式: {str(context_error)}")
+                        response = await self.ai_manager.chat_without_context(
+                            message=message,
+                            history=chat_history
+                        )
+                    else:
+                        response = await self.ai_manager.get_response(
+                            question=message,
+                            context=retrieval_context,
+                            history=context_history
+                        )
+                else:
+                    # 没有文档时降级为通用模式
+                    response = await self.ai_manager.chat_without_context(
+                        message=message,
+                        history=chat_history
+                    )
             
         except Exception as process_error:
             print(f"Error in message processing: {str(process_error)}")
@@ -1355,31 +1375,29 @@ class PaperAnalyzerService:
                 
                 has_documents = len(paper_ids) > 0
             
-            # 分析问题意图，即使有文档也可能是通用查询
+            # 智能分析问题意图
             intent = await self.ai_manager.identify_intent(
                 question=message,
-                context=None,  # 这里传None是因为我们只是判断意图
+                context=None,
                 has_documents=has_documents,
                 history=context_history
             )
             
             print(f"流式回复意图识别: {intent} for message: {message[:30]}...")
             
-            # 根据意图和会话类型综合判断处理方式
-            if intent == "GENERAL_QUERY" or session.session_type == "general":
-                # 通用聊天模式 - 不论是否有文档关联
+            # 根据意图决定处理方式
+            if intent == "GENERAL_QUERY":
+                # 通用查询模式 - 使用通用AI回答
                 print(f"使用通用聊天模式处理: {session_id}")
                 async for chunk in self.ai_manager.chat_without_context_stream(
                     message=message,
-                    history=chat_history  # 现在无论会话类型如何，chat_history都已定义
+                    history=chat_history
                 ):
-                    # 更新完整响应
                     if not chunk.get("error"):
                         text = chunk.get("partial_response", "")
                         full_response["answer"] += text
                         chunks.append(text)
                         
-                        # 转换为前端期望的格式
                         yield {
                             "id": f"stream_{len(chunks)}_{session_id}",
                             "content": text,
@@ -1392,34 +1410,61 @@ class PaperAnalyzerService:
                         }
                         return
             else:
-                # 文档相关模式 - 只有当意图是文档相关且有文档时
+                # 文档相关查询模式 - 结合文档内容回答
+                print(f"使用文档模式处理: {session_id}")
                 retrieval_context = None
-                if paper_ids:
-                    if len(paper_ids) > 1:
-                        retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
-                            question=message,
-                            paper_ids=paper_ids,
-                            history=context_history
-                        )
-                    else:
-                        retrieval_context = await self.rag_retriever.get_relevant_context(
-                            question=message,
-                            paper_id=paper_ids[0],
-                            history=context_history
-                        )
                 
+                # 获取文档上下文
+                if paper_ids:
+                    try:
+                        if len(paper_ids) > 1:
+                            retrieval_context = await self.rag_retriever.get_context_from_multiple_docs(
+                                question=message,
+                                paper_ids=paper_ids,
+                                history=context_history
+                            )
+                        else:
+                            retrieval_context = await self.rag_retriever.get_relevant_context(
+                                question=message,
+                                paper_id=paper_ids[0],
+                                history=context_history
+                            )
+                    except Exception as context_error:
+                        print(f"获取文档上下文失败: {str(context_error)}")
+                        # 如果获取文档上下文失败，降级为通用模式
+                        async for chunk in self.ai_manager.chat_without_context_stream(
+                            message=message,
+                            history=chat_history
+                        ):
+                            if not chunk.get("error"):
+                                text = chunk.get("partial_response", "")
+                                full_response["answer"] += text
+                                chunks.append(text)
+                                
+                                yield {
+                                    "id": f"stream_{len(chunks)}_{session_id}",
+                                    "content": text,
+                                    "done": chunk.get("done", False)
+                                }
+                            else:
+                                yield {
+                                    "error": chunk.get("error"),
+                                    "done": True
+                                }
+                                return
+                        return
+                
+                # 使用文档上下文进行流式回答
                 async for chunk in self.ai_manager.stream_response(
                     question=message,
                     context=retrieval_context,
                     history=context_history
                 ):
-                    # 更新完整响应
                     if not chunk.get("error"):
                         text = chunk.get("partial_response", "")
                         full_response["answer"] += text
                         chunks.append(text)
                         
-                        # 转换为前端期望的格式
                         yield {
                             "id": f"stream_{len(chunks)}_{session_id}",
                             "content": text,

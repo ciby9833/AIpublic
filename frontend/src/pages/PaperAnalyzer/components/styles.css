@@ -194,106 +194,122 @@
   font-weight: bold;
 }
 
-.copy-button {
-  background: none;
-  border: none;
-  padding: 4px;
+/* 消息内容包装器 */
+.message-content-wrapper {
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* 确保内容可以正确换行 */
+}
+
+/* 简单的复制按钮样式 */
+.copy-button-wrapper {
+  display: flex;
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+/* 用户消息的复制按钮右对齐 */
+.user .copy-button-wrapper {
+  justify-content: flex-end;
+}
+
+/* AI消息的复制按钮左对齐 */
+.chat-message:not(.user) .copy-button-wrapper {
+  justify-content: flex-start;
+}
+
+.copy-btn {
+  background: #f5f5f5;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 4px 8px;
   cursor: pointer;
-  color: #999;
+  color: #666;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  transition: all 0.3s ease;
-  opacity: 0.7; /* 默认轻微可见 */
+  min-width: 28px;
+  height: 28px;
+  transition: all 0.2s ease;
 }
 
-.chat-message:hover .copy-button {
-  opacity: 1;
-}
-
-.copy-button:hover {
-  background-color: #f0f0f0;
+.copy-btn:hover {
+  background: #e6f7ff;
+  border-color: #91d5ff;
   color: #1890ff;
 }
 
-.copy-button .anticon {
-  font-size: 14px;
+.copy-btn:active {
+  background: #bae7ff;
 }
 
-/* 优化消息气泡样式 */
-.message-bubble {
-  max-width: 85%;
-  margin-bottom: 8px;
-  padding: 12px;
-  border-radius: 8px;
-  position: relative;
-  transition: all 0.3s ease;
+/* 复制成功状态 */
+.copy-btn .anticon-check {
+  color: #52c41a;
 }
 
-.question-bubble {
-  background: #e6f7ff;
-  margin-left: auto;
-  border-top-right-radius: 4px;
+.message-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-right: 0; /* 移除默认margin，使用gap控制间距 */
 }
 
-.answer-bubble {
-  background: #f5f5f5;
-  margin-right: auto;
-  border-top-left-radius: 4px;
+.user .message-avatar {
+  background-color: #1890ff;
+  color: #fff;
+}
+
+.chat-message:not(.user) .message-avatar {
+  background-color: #f5f5f5;
+  color: #1890ff;
 }
 
 .message-content {
-  font-size: 13px;
-  line-height: 1.5;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background-color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  position: relative;
   word-break: break-word;
-  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-/* 优化复制成功动画 */
-@keyframes copySuccess {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.2);
-  }
-  100% {
-    transform: scale(1);
-  }
+.user .message-content {
+  background-color: #1890ff;
+  color: #fff;
+  border-bottom-right-radius: 4px;
 }
 
-.copy-button .anticon-check {
-  color: #52c41a;
-  animation: copySuccess 0.3s ease;
+.chat-message:not(.user) .message-content {
+  background-color: #fff;
+  border-bottom-left-radius: 4px;
 }
 
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .message-bubble {
-    padding: 10px;
-    max-width: 90%;
-  }
-
-  .copy-button {
-    opacity: 1;
-    padding: 3px;
-  }
-
-  .copy-button .anticon {
-    font-size: 12px;
-  }
-
-  .message-content {
-    font-size: 12px;
-  }
+/* 用户消息文本颜色 */
+.user .message-content,
+.user .message-content p,
+.user .message-content div {
+  color: #fff;
 }
 
-/* Enhance existing styles for better chat message rendering */
-.copy-button-container {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 4px;
+.user .message-content code {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.chat-message:not(.user) .message-content code {
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .rich-content-container {
@@ -452,35 +468,19 @@
 
 .chat-message {
   display: flex;
-  padding: 10px 16px;
-  width: 100%;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 100%;
+  margin-bottom: 20px;
+  padding: 0 16px;
+}
+
+.chat-message.user {
+  flex-direction: row-reverse;
 }
 
 .user-message {
   background-color: rgba(247, 247, 248, 0.9);
-}
-
-.message-avatar {
-  margin-right: 12px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background-color: #f0f0f0;
-}
-
-.user-message .message-avatar {
-  background-color: #1890ff;
-  color: white;
-}
-
-.message-content {
-  flex: 1;
-  line-height: 1.5;
-  font-size: 14px;
 }
 
 .message-text {

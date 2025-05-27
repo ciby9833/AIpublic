@@ -1,6 +1,8 @@
 export default {
   translation: {
-    title: 'Cargo Tool',
+    title: 'Cargo AI',
+    logout: 'Logout',
+    loading: 'Loading...',
     useGlossary: 'Use Glossary',
     sourceLanguage: 'Source Language',
     targetLanguage: 'Target Language',
@@ -83,7 +85,10 @@ export default {
     },
     tabs: {
       translation: "Translation",
-      glossaryManagement: "Glossary Management"
+      glossaryManagement: "Glossary Management",
+      userManagement: "User Management",
+      distanceCalculator: "Distance Calculator",
+      paperAnalyzer: "AI Robot & Translation"
     },
     glossary: {
       list: "Glossary List",
@@ -139,6 +144,155 @@ export default {
       filename: 'translated_{{filename}}',
       preparing: 'Preparing download...',
       completed: 'Download completed'
+    },
+    mobileChat: {
+      title: "Cargo AI Assistant",
+      newChat: "New Chat",
+      newConversation: "New Conversation",
+      chatHistory: "Chat History",
+      sessionHistory: "Session History",
+      noSessions: "No chat history",
+      createNewSession: "Create New Session",
+      unnamedSession: "Unnamed Session",
+      emptySession: "Empty Session",
+      confirmDelete: "Confirm Delete",
+      deleteConfirmText: "Are you sure you want to delete this session? This action cannot be undone.",
+      delete: "Delete",
+      cancel: "Cancel",
+      inputPlaceholder: "Type a message...",
+      inputPlaceholderWithFile: "Add message (optional)...",
+      thinking: "AI is thinking...",
+      uploading: "Uploading document...",
+      loadingMore: "Loading more messages...",
+      copied: "Copied",
+      copyMessage: "Copy message",
+      copyFailed: "Copy failed, please manually select text to copy",
+      uploadFile: "Upload file",
+      fileSelected: "File selected: {{filename}}",
+      fileSizeLimit: "File size cannot exceed 50MB",
+      unsupportedFileType: "Unsupported file type, please select PDF, Word, PowerPoint, Excel, text or Markdown files",
+      sessionLimitReached: "Current session has reached the document limit (10), please create a new session",
+      createSessionFailed: "Failed to create session",
+      uploadFailed: "Document upload failed",
+      sendFailed: "Send failed, please try again",
+      loadSessionFailed: "Failed to load chat history",
+      loadLatestSessionFailed: "Failed to load latest session, created new chat",
+      loadSessionListFailed: "Failed to load session list",
+      deleteSessionFailed: "Delete failed: {{message}}",
+      sessionDeleted: "Session deleted",
+      titleUpdated: "Session title updated",
+      updateTitleFailed: "Failed to save title: {{message}}",
+      loginExpired: "Login information has expired, please log in again",
+      loginExpiring: "Login is about to expire, please save important content",
+      loginStatusWarning: "Login Status Alert",
+      fileAnalysisComplete: "File {{filename}} has been successfully analyzed, you can start asking questions",
+      fileUploaded: "Uploaded file: {{filename}}",
+      documentAnalysisFailed: "Document analysis failed: {{message}}",
+      documentUploadSuccess: "Document uploaded successfully",
+      documentAnalysisFailed2: "Document analysis failed",
+      dragFileHere: "Drag file here to upload",
+      askAnything: "Feel free to ask me anything",
+      unknownError: "An unexpected error occurred",
+      documentAlreadyInSession: "Document already in session, skip adding step",
+      alreadyNewChat: "Current chat is already empty, no need to create a new chat",
+      confirm: "Confirm"
+    },
+    paperAnalyzer: {
+      title: "AI Q&A & Translation",
+      newChat: "New Chat",
+      chatHistory: "Chat History",
+      returnToChat: "Return to Current Chat",
+      newConversation: "New Conversation",
+      sessionTitle: "Session Title",
+      unnamedSession: "Unnamed Session",
+      editTitle: "Edit Title",
+      saveTitle: "Save",
+      deleteSession: "Delete Chat",
+      confirmDelete: "Confirm Delete",
+      deleteConfirmText: "Are you sure you want to delete this chat? This action cannot be undone.",
+      delete: "Delete",
+      cancel: "Cancel",
+      sessionDeleted: "Chat deleted",
+      createSessionFailed: "Failed to create chat",
+      loadSessionFailed: "Failed to load chat history",
+      deleteSessionFailed: "Delete failed: {{message}}",
+      titleUpdated: "Session title updated",
+      updateTitleFailed: "Failed to save title: {{message}}",
+      
+      // Input area
+      inputPlaceholder: "Enter your question or drag files here",
+      inputPlaceholderAnalyzing: "Analyzing document, please wait...",
+      inputPlaceholderSelectSession: "Select a session to start chatting",
+      uploadFile: "Upload file",
+      viewSessionDocuments: "View session documents",
+      send: "Send",
+      analyzing: "Analyzing...",
+      thinking: "Thinking...",
+      
+      // Document analysis
+      documentAnalysisComplete: "Document analysis complete",
+      documentAnalysisFailed: "Document analysis failed",
+      createSessionFailed2: "Failed to create session",
+      addDocumentFailed: "Failed to add document to session",
+      sessionDocumentLimitReached: "Current session has reached the document limit (10), please create a new session to continue adding documents",
+      documentLimitTitle: "Document limit reached",
+      documentLimitContent: "Current session already contains 10 documents. Would you like to create a new session?",
+      createNewSession: "Create New Session",
+      
+      // Translation features
+      selectTargetLanguage: "Select target language",
+      translate: "Translate",
+      translating: "Translating...",
+      translationComplete: "Translation complete",
+      translationFailed: "Translation failed",
+      noTranslationContent: "No translation content available for download",
+      downloadFailed: "Download failed",
+      
+      // Document viewer
+      originalText: "Original",
+      translation: "Translation",
+      syncScrolling: "Sync Scrolling",
+      independentScrolling: "Independent Scrolling",
+      downloadTranslation: "Download Translation",
+      uploadDocumentPrompt: "Please upload a document or wait for analysis to complete",
+      selectLanguagePrompt: "Please select a language and click translate",
+      
+      // Download options
+      wordDocument: "Word Document",
+      pdfDocument: "PDF Document",
+      markdown: "Markdown",
+      
+      // Session list
+      noSessionHistory: "No chat history",
+      messagesCount: "{{count}} messages",
+      aiOnlySession: "AI Chat",
+      documentSession: "Document Chat",
+      
+      // Session documents
+      sessionDocuments: "Session Documents",
+      noDocuments: "No documents in current session",
+      
+      // Loading states
+      loadingMoreMessages: "Loading more messages...",
+      
+      // Error messages
+      questionRequired: "Please enter a question or upload a file",
+      sendFailed: "Failed to ask question",
+      processingFailed: "Processing failed",
+      loginExpired: "Login has expired, please log in again",
+      
+      // Success messages
+      fileAnalysisComplete: "File {{filename}} has been successfully analyzed, you can start asking questions"
+    },
+    chatMessage: {
+      referenceSources: "Reference Sources",
+      sourcesCount: "{{count}} sources",
+      unknownSource: "Unknown source",
+      copied: "Copied",
+      copyMessage: "Copy message",
+      copySuccess: "Copied to clipboard",
+      copyFailed: "Copy failed",
+      chartRenderFailed: "Chart rendering failed"
     }
   }
 }

@@ -35,6 +35,17 @@ class ChatTopicSession(Base):
     # 不需要双向关系，避免循环引用
     # session = relationship("ChatSession", back_populates="topics")
 
+# 消息片段模型 - 用于存储大型消息的分片
+class MessageFragment(Base):
+    __tablename__ = "message_fragments"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id = Column(UUID(as_uuid=True), ForeignKey('chat_messages.id', ondelete='CASCADE'), nullable=False)
+    fragment_index = Column(Integer, nullable=False)  # 片段索引
+    content = Column(JSONB, nullable=False)  # 片段内容
+    content_hash = Column(String(32))  # 内容哈希，用于校验
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 # 文件上传模型 - 用于无需分析的临时文件
 class ChatFile(Base):
     __tablename__ = "chat_files"

@@ -1,0 +1,49 @@
+.error-boundary {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-color: #f5f5f5;
+  padding: 20px;
+}
+
+.error-content {
+  background: white;
+  border-radius: 8px;
+  padding: 40px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-width: 500px;
+  width: 100%;
+}
+
+.error-content h2 {
+  color: #ff4d4f;
+  margin-bottom: 16px;
+  font-size: 24px;
+}
+
+.error-content p {
+  color: #666;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.retry-button {
+  background-color: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 24px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.retry-button:hover {
+  background-color: #40a9ff;
+}
+
+.retry-button:active {
+  background-color: #096dd9;
+} 

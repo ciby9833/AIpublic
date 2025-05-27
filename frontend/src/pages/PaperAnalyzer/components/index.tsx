@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ReactMarkdown from 'react-markdown';
 import mermaid from 'mermaid';
+import { useTranslation } from 'react-i18next';
 import './styles.css';
 
 // Fix: Import katex for math formula rendering
@@ -55,11 +56,12 @@ const detectTable = (text: string): { isTable: boolean, rows: string[][] } => {
 };
 
 // Improved: Better formula detection in preprocessMermaidContent
-const preprocessMermaidContent = (content: string): string => {
+const preprocessMermaidContent = (content: string, t?: any): string => {
   if (!content) return '';
   
   // Remove any existing error messages that might be in the content
-  const cleanContent = content.replace(/图表渲染失败\s*/g, '');
+  const errorMessage = t ? t('chatMessage.chartRenderFailed') : '图表渲染失败';
+  const cleanContent = content.replace(new RegExp(errorMessage + '\\s*', 'g'), '');
   
   // Check for diagram type
   if (cleanContent.includes('mindmap')) {
@@ -248,71 +250,111 @@ const preprocessMermaidContent = (content: string): string => {
 };
 
 const ChatMessage: React.FC<{ message: any }> = ({ message }) => {
+  const { t } = useTranslation();
   const { role, content, reply, sources } = message;
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   
   const toggleSources = () => {
     setSourcesExpanded(!sourcesExpanded);
   };
+
+  // 简单的复制功能
+  const handleCopy = async () => {
+    try {
+      // 获取要复制的文本
+      let textToCopy = '';
+      if (Array.isArray(reply) && reply.length > 0) {
+        textToCopy = reply.map(item => item.content || '').join('\n\n');
+      } else {
+        textToCopy = content || '';
+      }
+      
+      if (textToCopy.trim()) {
+        await navigator.clipboard.writeText(textToCopy);
+        setCopySuccess(true);
+        antMessage.success(t('chatMessage.copySuccess'));
+        setTimeout(() => setCopySuccess(false), 2000);
+      }
+    } catch (error) {
+      console.error(t('chatMessage.copyFailed'), error);
+      antMessage.error(t('chatMessage.copyFailed'));
+    }
+  };
   
   return (
-    <div className={`chat-message ${role}`}>
+    <div className={`chat-message ${role === 'user' ? 'user' : ''}`}>
       <div className="message-avatar">
         {role === 'user' ? <UserOutlined /> : <RobotOutlined />}
       </div>
-      <div className="message-content">
-        {/* Prioritize using the reply array content */}
-        {Array.isArray(reply) && reply.length > 0 ? (
-          reply.map((item, index) => {
-            if (item.type === 'markdown') {
-              return <ReactMarkdown key={index}>{item.content}</ReactMarkdown>;
-            } else if (item.type === 'code') {
-              return (
-                <pre key={index} className={`language-${item.language || 'text'}`}>
-                  <code>{item.content}</code>
-                </pre>
-              );
-            } else if (item.type === 'table') {
-              return <ReactMarkdown key={index}>{item.content}</ReactMarkdown>;
-            } else {
-              // Default text rendering
-              return <div key={index}>{item.content}</div>;
-            }
-          })
-        ) : (
-          // Fallback to content field if reply array is empty
-          <div>{content}</div>
-        )}
+      <div className="message-content-wrapper">
+        <div className="message-content">
+          {/* Prioritize using the reply array content */}
+          {Array.isArray(reply) && reply.length > 0 ? (
+            reply.map((item, index) => {
+              if (item.type === 'markdown') {
+                return <ReactMarkdown key={index}>{item.content}</ReactMarkdown>;
+              } else if (item.type === 'code') {
+                return (
+                  <pre key={index} className={`language-${item.language || 'text'}`}>
+                    <code>{item.content}</code>
+                  </pre>
+                );
+              } else if (item.type === 'table') {
+                return <ReactMarkdown key={index}>{item.content}</ReactMarkdown>;
+              } else {
+                // Default text rendering
+                return <div key={index}>{item.content}</div>;
+              }
+            })
+          ) : (
+            // Fallback to content field if reply array is empty
+            <div>{content}</div>
+          )}
+          
+          {/* Display sources if available - with expand/collapse functionality */}
+          {Array.isArray(sources) && sources.length > 0 && (
+            <div className="message-sources">
+              <div className="sources-header" onClick={toggleSources}>
+                <span className="sources-title">
+                  {t('chatMessage.referenceSources')}: {t('chatMessage.sourcesCount', { count: sources.length })}
+                </span>
+                <span className="toggle-icon">
+                  {sourcesExpanded ? <UpOutlined /> : <DownOutlined />}
+                </span>
+              </div>
+              <div className={`sources-content ${sourcesExpanded ? 'expanded' : ''}`}>
+                <ul className="sources-list">
+                  {sources.map((source, idx) => (
+                    <li key={idx} className="source-item">
+                      {source.content ? (
+                        <>
+                          {source.document_name && <span className="source-document">{source.document_name}</span>}
+                          <span className="source-content">
+                            {source.content}
+                          </span>
+                        </>
+                      ) : (
+                        <span>{t('chatMessage.unknownSource')}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
         
-        {/* Display sources if available - with expand/collapse functionality */}
-        {Array.isArray(sources) && sources.length > 0 && (
-          <div className="message-sources">
-            <div className="sources-header" onClick={toggleSources}>
-              <span className="sources-title">参考来源: {sources.length}个</span>
-              <span className="toggle-icon">
-                {sourcesExpanded ? <UpOutlined /> : <DownOutlined />}
-              </span>
-            </div>
-            <div className={`sources-content ${sourcesExpanded ? 'expanded' : ''}`}>
-              <ul className="sources-list">
-                {sources.map((source, idx) => (
-                  <li key={idx} className="source-item">
-                    {source.content ? (
-                      <>
-                        {source.document_name && <span className="source-document">{source.document_name}</span>}
-                        <span className="source-content">
-                          {source.content}
-                        </span>
-                      </>
-                    ) : (
-                      <span>未知来源</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
+        {/* 简单的复制按钮 */}
+        <div className="copy-button-wrapper">
+          <button 
+            className="copy-btn" 
+            onClick={handleCopy}
+            title={copySuccess ? t('chatMessage.copied') : t('chatMessage.copyMessage')}
+          >
+            {copySuccess ? <CheckOutlined /> : <CopyOutlined />}
+          </button>
+        </div>
       </div>
     </div>
   );

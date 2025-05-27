@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config/env';
+import { apiRequest } from './auth';
 
 export interface TranslationResponse {
   success: boolean;
@@ -12,19 +13,51 @@ const createApiUrl = (path: string) => {
   return import.meta.env.PROD ? path : `${API_BASE_URL}${path}`;
 };
 
-// 文档翻译相关
-export const translateDocument = async (file: File, sourceLang: string, targetLang: string, useGlossary: boolean) => {
+// 翻译文档
+export const translateDocument = async (
+  file: File, 
+  sourceLang: string, 
+  targetLang: string, 
+  useGlossary: boolean = false
+): Promise<Response> => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('source_lang', sourceLang);
   formData.append('target_lang', targetLang);
   formData.append('use_glossary', useGlossary.toString());
 
-  const response = await fetch(createApiUrl('/api/translate'), {
+  return apiRequest(`${API_BASE_URL}/api/translate/upload`, {
     method: 'POST',
-    body: formData,
+    body: formData
   });
-  return response;
+};
+
+// 检查翻译状态
+export const checkTranslationStatus = async (
+  documentId: string, 
+  documentKey: string
+): Promise<Response> => {
+  return apiRequest(`${API_BASE_URL}/api/translate/${documentId}/status`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({ document_key: documentKey })
+  });
+};
+
+// 下载翻译结果
+export const downloadTranslationResult = async (
+  documentId: string, 
+  documentKey: string
+): Promise<Response> => {
+  return apiRequest(`${API_BASE_URL}/api/translate/${documentId}/result`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({ document_key: documentKey })
+  });
 };
 
 // 文本翻译相关
@@ -99,72 +132,121 @@ interface SearchGlossariesParams {
   targetLang?: string;
 }
 
-export const glossaryApi = {
-  // 获取术语表列表
-  getGlossaries: () => 
-    fetch(createApiUrl('/api/glossaries')),
-
-  // 创建术语表
-  createGlossary: (data: any) => 
-    fetch(createApiUrl('/api/glossaries'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }),
-
-  // 删除术语表
-  deleteGlossary: (glossaryId: string) => 
-    fetch(createApiUrl(`/api/glossaries/${glossaryId}`), {
-      method: 'DELETE',
-    }),
-
-  // 获取术语表详情
-  getGlossaryDetails: (glossaryId: string, page: number, pageSize: number) => 
-    fetch(createApiUrl(`/api/glossaries/${glossaryId}/details?page=${page}&page_size=${pageSize}`)),
-
-  // 搜索术语表和词条查询本地数据库
-  searchGlossaries: async (params: SearchGlossariesParams): Promise<GlossarySearchResponse> => {
-    const queryParams = new URLSearchParams();
-    
-    // 确保始终发送分页参数
-    queryParams.append('page', params.page?.toString() || '1');
-    queryParams.append('page_size', params.pageSize?.toString() || '10');
-    
-    // 添加其他可选查询参数
-    if (params.name) queryParams.append('name', params.name);
-    if (params.startDate) queryParams.append('start_date', params.startDate);
-    if (params.endDate) queryParams.append('end_date', params.endDate);
-    if (params.sourceLang) queryParams.append('source_lang', params.sourceLang);
-    if (params.targetLang) queryParams.append('target_lang', params.targetLang);
-
-    const response = await fetch(createApiUrl(`/api/glossaries-search?${queryParams}`));
-    if (!response.ok) {
-      throw new Error('Search failed');
-    }
-    return response.json();
+// 用户管理相关API
+export const userApi = {
+  // 获取用户列表
+  getUsers: async (): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/users`);
   },
 
-  // 更新术语表条目本地数据库
-  updateGlossaryEntry: async (entryId: number, targetTerm: string) => {
-    const response = await fetch(createApiUrl(`/api/glossary-entries/${entryId}`), {
+  // 获取用户详情
+  getUserById: async (userId: string): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/users/${userId}`);
+  },
+
+  // 更新用户信息
+  updateUser: async (userId: string, userData: any): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/users/${userId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_term: targetTerm }),
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(userData)
     });
+  }
+};
+
+// 词汇表相关API
+export const glossaryApi = {
+  // 搜索词汇表
+  searchGlossary: async (query: string): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary/search?q=${encodeURIComponent(query)}`);
+  },
+
+  // 高级搜索词汇表
+  searchGlossaries: async (params: SearchGlossariesParams): Promise<GlossarySearchResponse> => {
+    const searchParams = new URLSearchParams();
+    
+    if (params.page) searchParams.append('page', params.page.toString());
+    if (params.pageSize) searchParams.append('page_size', params.pageSize.toString());
+    if (params.name) searchParams.append('name', params.name);
+    if (params.startDate) searchParams.append('start_date', params.startDate);
+    if (params.endDate) searchParams.append('end_date', params.endDate);
+    if (params.sourceLang) searchParams.append('source_lang', params.sourceLang);
+    if (params.targetLang) searchParams.append('target_lang', params.targetLang);
+
+    const response = await apiRequest(`${API_BASE_URL}/api/glossary/search?${searchParams.toString()}`);
+    
     if (!response.ok) {
-      throw new Error('Update failed');
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
     }
+    
     return response.json();
   },
 
-  // 删除术语表条目
-  deleteGlossaryEntry: async (entryId: number) => {
-    const response = await fetch(createApiUrl(`/api/glossary-entries/${entryId}`), {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      throw new Error('Delete failed');
-    }
-    return response.json();
+  // 获取词汇表列表
+  getGlossaryList: async (): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary`);
   },
+
+  // 获取词汇表列表（别名）
+  getGlossaries: async (): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary`);
+  },
+
+  // 获取词汇表详情
+  getGlossaryDetails: async (glossaryId: string, page: number = 1, pageSize: number = 10): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary/${glossaryId}?page=${page}&page_size=${pageSize}`);
+  },
+
+  // 创建词汇表
+  createGlossary: async (glossaryData: any): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(glossaryData)
+    });
+  },
+
+  // 删除词汇表
+  deleteGlossary: async (glossaryId: string): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary/${glossaryId}`, {
+      method: 'DELETE'
+    });
+  },
+
+  // 添加词汇表条目
+  addGlossaryEntry: async (entry: any): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary/entries`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(entry)
+    });
+  },
+
+  // 更新词汇表条目
+  updateGlossaryEntry: async (entryId: string, targetTerm: string): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary/entries/${entryId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ target_term: targetTerm })
+    });
+  },
+
+  // 删除词汇表条目
+  deleteGlossaryEntry: async (entryId: string): Promise<Response> => {
+    return apiRequest(`${API_BASE_URL}/api/glossary/entries/${entryId}`, {
+      method: 'DELETE'
+    });
+  }
 };
+
+// 通用API请求函数（向后兼容）
+export const makeAuthenticatedRequest = apiRequest;

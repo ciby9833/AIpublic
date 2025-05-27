@@ -77,6 +77,7 @@ class ChatMessage(Base):
     
     # 新增字段：存储富文本内容
     rich_content = Column(JSONB, nullable=True)  # 存储结构化的富文本内容 数据库需要更新
+    has_fragments = Column(Boolean, default=False)  # 标记是否有消息片段
     
     # 关联关系
     session = relationship("ChatSession", back_populates="messages")

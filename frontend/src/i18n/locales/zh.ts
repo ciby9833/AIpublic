@@ -1,6 +1,8 @@
 export default {
   translation: {
-    title: 'Cargo Tool',
+    title: 'Cargo AI',
+    logout: '退出登录',
+    loading: '加载中...',
     useGlossary: '使用术语表',
     sourceLanguage: '源语言',  // 'Source Language' / 'Bahasa Sumber'
     targetLanguage: '目标语言', 
@@ -84,7 +86,8 @@ export default {
       translation: "翻译",
       glossaryManagement: "术语表管理",
       userManagement: "用户管理",
-      distanceCalculator: "距离计算"
+      distanceCalculator: "距离计算",
+      paperAnalyzer: "AI机器人&翻译"
     },
     glossary: {
       information: "术语表信息",
@@ -146,6 +149,155 @@ export default {
       lastLogin: "最后登录时间",
       status: "状态", 
       searchPlaceholder: "搜索用户..."
+    },
+    mobileChat: {
+      title: "Cargo AI助手",
+      newChat: "新对话",
+      newConversation: "新建对话",
+      chatHistory: "历史会话",
+      sessionHistory: "会话历史",
+      noSessions: "暂无会话历史",
+      createNewSession: "创建新会话",
+      unnamedSession: "未命名会话",
+      emptySession: "空会话",
+      confirmDelete: "确认删除",
+      deleteConfirmText: "确定要删除这个会话吗？此操作不可恢复。",
+      delete: "删除",
+      cancel: "取消",
+      inputPlaceholder: "输入消息...",
+      inputPlaceholderWithFile: "添加消息（可选）...",
+      thinking: "AI正在思考...",
+      uploading: "正在上传文档...",
+      loadingMore: "加载更多消息...",
+      copied: "已复制",
+      copyMessage: "复制消息",
+      copyFailed: "复制失败，请手动选择文本复制",
+      uploadFile: "上传文件",
+      fileSelected: "已选择文件: {{filename}}",
+      fileSizeLimit: "文件大小不能超过50MB",
+      unsupportedFileType: "不支持的文件类型，请选择PDF、Word、PowerPoint、Excel、文本或Markdown文件",
+      sessionLimitReached: "当前会话文档数量已达到上限（10个），请创建新会话",
+      createSessionFailed: "创建会话失败",
+      uploadFailed: "文档上传失败",
+      sendFailed: "发送失败，请重试",
+      loadSessionFailed: "加载对话历史失败",
+      loadLatestSessionFailed: "加载最新会话失败，已创建新对话",
+      loadSessionListFailed: "加载会话列表失败",
+      deleteSessionFailed: "删除失败: {{message}}",
+      sessionDeleted: "会话已删除",
+      titleUpdated: "会话标题已更新",
+      updateTitleFailed: "保存标题失败: {{message}}",
+      loginExpired: "登录信息已失效，请重新登录",
+      loginExpiring: "登录即将过期，请保存重要内容",
+      loginStatusWarning: "登录状态提示",
+      fileAnalysisComplete: "文件 {{filename}} 已成功分析，可以开始提问了",
+      fileUploaded: "上传了文件: {{filename}}",
+      documentAnalysisFailed: "文档分析失败: {{message}}",
+      documentUploadSuccess: "文档上传成功",
+      documentAnalysisFailed2: "文档分析失败",
+      dragFileHere: "拖拽文件到此处上传",
+      askAnything: "有任何问题都可以向我提问",
+      unknownError: "未知错误",
+      documentAlreadyInSession: "文档已在会话中，跳过添加步骤",
+      alreadyNewChat: "当前已经是空白新会话，无需创建",
+      confirm: "确定"
+    },
+    paperAnalyzer: {
+      title: "AI问答&翻译",
+      newChat: "新对话",
+      chatHistory: "历史对话",
+      returnToChat: "返回当前对话",
+      newConversation: "新对话",
+      sessionTitle: "会话标题",
+      unnamedSession: "未命名会话",
+      editTitle: "编辑标题",
+      saveTitle: "保存",
+      deleteSession: "删除对话",
+      confirmDelete: "确认删除",
+      deleteConfirmText: "确定要删除这个对话吗？此操作不可恢复。",
+      delete: "删除",
+      cancel: "取消",
+      sessionDeleted: "对话已删除",
+      createSessionFailed: "创建对话失败",
+      loadSessionFailed: "加载对话历史失败",
+      deleteSessionFailed: "删除失败: {{message}}",
+      titleUpdated: "会话标题已更新",
+      updateTitleFailed: "保存标题失败: {{message}}",
+      
+      // 输入区域
+      inputPlaceholder: "请输入您的问题或拖拽文件到此处",
+      inputPlaceholderAnalyzing: "正在分析文档，请稍候...",
+      inputPlaceholderSelectSession: "选择一个会话开始聊天",
+      uploadFile: "上传文件",
+      viewSessionDocuments: "查看会话文档",
+      send: "发送",
+      analyzing: "分析中...",
+      thinking: "正在思考...",
+      
+      // 文档分析
+      documentAnalysisComplete: "文档分析完成",
+      documentAnalysisFailed: "文档分析失败",
+      createSessionFailed2: "创建会话失败",
+      addDocumentFailed: "添加文档到会话失败",
+      sessionDocumentLimitReached: "当前会话文档数量已达到上限（10个），请创建新会话继续添加文档",
+      documentLimitTitle: "文档数量已达到上限",
+      documentLimitContent: "当前会话已包含10个文档，是否创建一个新会话？",
+      createNewSession: "创建新会话",
+      
+      // 翻译功能
+      selectTargetLanguage: "选择目标语言",
+      translate: "翻译",
+      translating: "正在翻译...",
+      translationComplete: "翻译完成",
+      translationFailed: "翻译失败",
+      noTranslationContent: "没有可下载的翻译内容",
+      downloadFailed: "下载失败",
+      
+      // 文档查看器
+      originalText: "原文",
+      translation: "翻译",
+      syncScrolling: "同步滚动",
+      independentScrolling: "独立滚动",
+      downloadTranslation: "下载翻译",
+      uploadDocumentPrompt: "请上传文档或等待分析完成",
+      selectLanguagePrompt: "请选择语言并点击翻译按钮",
+      
+      // 下载选项
+      wordDocument: "Word 文档",
+      pdfDocument: "PDF 文档",
+      markdown: "Markdown",
+      
+      // 会话列表
+      noSessionHistory: "暂无对话历史",
+      messagesCount: "{{count}}条消息",
+      aiOnlySession: "AI对话",
+      documentSession: "文档对话",
+      
+      // 会话文档
+      sessionDocuments: "会话文档",
+      noDocuments: "当前会话没有文档",
+      
+      // 加载状态
+      loadingMoreMessages: "加载更多消息...",
+      
+      // 错误消息
+      questionRequired: "请输入问题或上传文件",
+      sendFailed: "提问失败",
+      processingFailed: "处理失败",
+      loginExpired: "登录已过期，请重新登录",
+      
+      // 成功消息
+      fileAnalysisComplete: "文件 {{filename}} 已成功分析，可以开始提问了"
+    },
+    chatMessage: {
+      referenceSources: "参考来源",
+      sourcesCount: "{{count}}个",
+      unknownSource: "未知来源",
+      copied: "已复制",
+      copyMessage: "复制消息",
+      copySuccess: "已复制到剪贴板",
+      copyFailed: "复制失败",
+      chartRenderFailed: "图表渲染失败"
     }
   }
 }

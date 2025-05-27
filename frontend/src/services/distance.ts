@@ -1,6 +1,7 @@
 // frontend/src/services/distance.ts
 import { message } from 'antd';
 import { API_BASE_URL } from '../config/env';
+import { apiRequest } from './auth';
 
 // 复用 api.ts 中的 URL 创建方法
 const createApiUrl = (path: string) => {
@@ -26,15 +27,11 @@ export const distanceApi = {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(
+      const response = await apiRequest(
         createApiUrl('/api/calculate-distance'),
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          body: formData,
-          credentials: 'include'
+          body: formData
         }
       );
 
@@ -54,14 +51,10 @@ export const distanceApi = {
   // 获取所有任务
   getAllTasks: async (): Promise<Task[]> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         createApiUrl('/api/tasks'),
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -81,14 +74,10 @@ export const distanceApi = {
   // 获取单个任务状态
   getTaskStatus: async (taskId: string): Promise<Task> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         createApiUrl(`/api/tasks/${taskId}`),
         {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'GET'
         }
       );
 
@@ -108,15 +97,13 @@ export const distanceApi = {
   // 下载任务结果
   downloadResult: async (taskId: string): Promise<Blob> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         createApiUrl(`/api/tasks/${taskId}/download`),
         {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
             'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          },
-          credentials: 'include'
+          }
         }
       );
 
@@ -150,14 +137,10 @@ export const distanceApi = {
   // 取消任务
   cancelTask: async (taskId: string): Promise<void> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         createApiUrl(`/api/tasks/${taskId}/cancel`),
         {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'POST'
         }
       );
 
@@ -175,14 +158,10 @@ export const distanceApi = {
   // 删除任务
   deleteTask: async (taskId: string): Promise<void> => {
     try {
-      const response = await fetch(
+      const response = await apiRequest(
         createApiUrl(`/api/tasks/${taskId}`),
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          credentials: 'include'
+          method: 'DELETE'
         }
       );
 

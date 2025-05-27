@@ -227,7 +227,7 @@
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 0;
+  padding: 8px 0;
   background: white;
   min-height: 0;
   border-radius: 0;
@@ -328,53 +328,15 @@
   margin-bottom: 20px;
 }
 
-.chat-message {
-  display: flex;
-  padding: 10px 16px;
-  width: 100%;
-}
-
 .user-message {
-  background-color: rgba(247, 247, 248, 0.9);
-}
-
-.message-avatar {
-  margin-right: 12px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background-color: #f0f0f0;
-}
-
-.user-message .message-avatar {
-  background-color: #1890ff;
-  color: white;
-}
-
-.message-content {
-  flex: 1;
-  line-height: 1.5;
-  font-size: 14px;
+  background-color: transparent;
+  padding: 0;
 }
 
 .message-text {
   padding: 4px 0;
   word-break: break-word;
   overflow-wrap: break-word;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-  background: white;
-  min-height: 0;
-  border-radius: 0;
-  margin: 0;
 }
 
 .response-list {
@@ -389,23 +351,17 @@
 }
 
 .chat-message:not(:last-child) {
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.user-message {
-  padding-top: 14px;
-  padding-bottom: 14px;
+  border-bottom: none;
 }
 
 .chat-message:hover {
-  background-color: rgba(247, 247, 248, 1);
+  background-color: transparent;
 }
 
 .user-message:hover {
-  background-color: rgba(240, 240, 245, 1);
+  background-color: transparent;
 }
 
-/* Scrollbar styling for better UX */
 .chat-messages::-webkit-scrollbar {
   width: 5px;
 }
@@ -424,7 +380,6 @@
   background: #aaa;
 }
 
-/* 优化折叠动画 */
 .paper-analyzer-sider {
   position: relative;
   transition: all 0.3s ease;
@@ -469,231 +424,6 @@
   z-index: 1000;
 }
 
-/* 修改响应式布局样式 */
-@media (max-width: 1200px) {
-  .paper-analyzer-sider {
-    width: 350px !important;
-  }
-  
-  .paper-analyzer-sider.ant-layout-sider-collapsed {
-    width: 40px !important;
-  }
-  
-  .document-content-split {
-    flex-direction: column;
-  }
-  
-  .original-content,
-  .translated-content {
-    max-height: 50vh;
-    padding: 16px 20px; /* 调整内边距 */
-  }
-}
-
-@media (max-width: 768px) {
-  /* 覆盖原有的移动端布局样式 */
-  .paper-analyzer-layout {
-    flex-direction: row; /* 强制使用桌面布局 */
-  }
-
-  .paper-analyzer-sider {
-    position: relative; /* 覆盖固定定位 */
-    height: 100% !important; /* 恢复高度 */
-    max-height: none !important; /* 移除最大高度限制 */
-    bottom: auto; /* 移除底部定位 */
-  }
-
-  .paper-analyzer-content {
-    margin-bottom: 0; /* 移除底部边距 */
-    padding-bottom: 0; /* 移除底部内边距 */
-  }
-  
-  /* 隐藏移动端特有元素 */
-  .mobile-doc-toggle,
-  .mobile-view-switcher,
-  .chat-handle-bar,
-  .document-content-mobile {
-    display: none !important;
-  }
-  
-  /* 确保文档分割视图始终显示 */
-  .document-content-split {
-    display: flex !important;
-  }
-
-  .chat-input-container {
-    position: sticky;
-    bottom: 0;
-    background: #fff;
-    z-index: 10;
-  }
-
-  .document-header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .header-left {
-    width: auto; /* 不再占满整行 */
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .header-right {
-    width: auto; /* 不再占满整行 */
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .header-right .ant-select {
-    width: 120px !important;
-  }
-
-  .header-right .ant-btn {
-    height: 24px; /* 减小按钮高度 */
-    padding: 0 8px;
-    font-size: 12px;
-  }
-
-  .document-content-split {
-    flex-direction: column;
-  }
-
-  .original-content,
-  .translated-content {
-    max-height: none;
-    padding: 8px 12px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .chat-container {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .chat-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 8px;
-    height: 32px;
-    background: #fff;
-    border-bottom: 1px solid #f0f0f0;
-  }
-
-  .chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px;
-    background: #f9f9f9;
-  }
-
-  .chat-input-container {
-    padding: 8px;
-    background: #fff;
-    border-top: 1px solid #f0f0f0;
-  }
-
-  .input-area {
-    border: 1px solid #d9d9d9;
-    border-radius: 4px;
-    padding: 8px;
-  }
-
-  .input-actions {
-    margin-top: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .input-actions .ant-btn {
-    height: 32px;
-  }
-
-  /* 优化文件显示区域 */
-  .selected-file {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: 1;
-    margin: 0;
-    padding: 0;
-    background: transparent;
-  }
-
-  .selected-file .file-name {
-    font-size: 12px;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .delete-file-btn {
-    padding: 0 4px;
-    height: 24px;
-  }
-
-  .collapse-button {
-    padding: 0 4px;
-    height: 24px;
-    margin-left: 8px;
-  }
-}
-
-@media (max-width: 480px) {
-  /* 应用相同的覆盖规则 */
-  .mobile-doc-toggle,
-  .mobile-view-switcher,
-  .chat-handle-bar {
-    display: none !important;
-  }
-
-  .document-header {
-    padding: 4px 6px;
-  }
-
-  .header-right .ant-select {
-    width: 100px !important;
-  }
-
-  .header-right .ant-btn {
-    padding: 0 6px;
-  }
-
-  .paper-analyzer-sider {
-    height: 50vh !important; /* 更小屏幕下减小高度 */
-  }
-
-  .paper-analyzer-content {
-    margin-bottom: 50vh;
-  }
-
-  .chat-header {
-    padding: 4px 6px;
-  }
-
-  .input-area {
-    padding: 6px;
-  }
-
-  .input-actions {
-    margin-top: 6px;
-  }
-
-  .input-actions .ant-btn {
-    height: 28px;
-  }
-}
-
-/* 优化滚动条样式，参考 mad-professor 的实现 */
 .original-content::-webkit-scrollbar,
 .translated-content::-webkit-scrollbar {
   width: 4px;
@@ -715,7 +445,6 @@
   background: #555;
 }
 
-/* 优化聊天消息样式 */
 .chat-messages {
   padding: 8px;
 }
@@ -728,11 +457,6 @@
 .message-header {
   font-size: 11px;
   margin-bottom: 2px;
-}
-
-.message-content {
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 .content-header {
@@ -764,19 +488,6 @@
   background: #f0f0f0;
 }
 
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .content-header {
-    margin-bottom: 8px;
-    padding-bottom: 6px;
-  }
-  
-  .download-button {
-    padding: 2px 4px;
-  }
-}
-
-/* 添加行号容器样式 */
 .line-numbers {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
   font-size: 13px;
@@ -819,7 +530,6 @@
   text-overflow: ellipsis;
 }
 
-/* 优化行号显示 */
 .original-content .line-number,
 .translated-content .line-number {
   font-size: 12px;
@@ -830,7 +540,6 @@
   margin-right: 8px;
 }
 
-/* 添加行号悬停效果 */
 .line-container:hover {
   background-color: #f5f5f5;
 }
@@ -840,20 +549,6 @@
   color: #1890ff;
 }
 
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .line-number {
-    width: 30px;
-    padding-right: 8px;
-    font-size: 11px;
-  }
-  
-  .line-content {
-    font-size: 12px;
-  }
-}
-
-/* 添加分析状态样式 */
 .input-area.analyzing {
   border-color: #1890ff;
   background-color: #f0f7ff;
@@ -877,7 +572,6 @@
   z-index: 2;
 }
 
-/* 优化分析中的消息样式 */
 .analyzing-message {
   background-color: #f0f7ff;
   border: 1px solid #91d5ff;
@@ -894,25 +588,21 @@
   font-size: 16px;
 }
 
-/* 优化按钮禁用状态 */
 .ant-btn[disabled] {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-/* 优化上传按钮样式 */
 .ant-upload-disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-/* 优化分析中的文本区域 */
 .input-area.analyzing .ant-input {
   background-color: #f0f7ff;
   cursor: not-allowed;
 }
 
-/* 添加分析中的动画效果 */
 @keyframes analyzing-pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.4);
@@ -929,7 +619,6 @@
   animation: analyzing-pulse 2s infinite;
 }
 
-/* Fix virtualized container styling */
 .ReactVirtualized__List {
   overflow-y: auto !important;
   width: 100% !important;
@@ -937,12 +626,10 @@
   max-height: 100% !important;
 }
 
-/* Improve rendering performance */
 .ReactVirtualized__Grid__innerScrollContainer {
   will-change: transform;
 }
 
-/* Fix empty states */
 .empty-document, 
 .empty-translation {
   flex: 1;
@@ -959,7 +646,6 @@
   font-size: 14px;
 }
 
-/* Add this new style for the content wrapper */
 .content-wrapper {
   flex: 1;
   overflow: auto;
@@ -969,7 +655,6 @@
   background-color: #fafafa;
 }
 
-/* Optimize line display */
 .line-container {
   border-bottom: 1px solid #f5f5f5;
 }
@@ -978,7 +663,6 @@
   border-bottom: none;
 }
 
-/* Resize handle styles */
 .resize-handle {
   position: absolute;
   top: 0;
@@ -1005,12 +689,6 @@
   transition: background-color 0.2s, width 0.2s;
 }
 
-/* Make sure the sider has relative positioning for the handle */
-.paper-analyzer-sider {
-  position: relative;
-}
-
-/* Completely disable transitions during resize for smoother experience */
 .paper-analyzer-sider {
   transition: width 0.2s ease;
 }
@@ -1023,14 +701,12 @@
   transition: none !important;
 }
 
-/* Update the header-actions styles to better align items */
 .header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* Add style for the switch to align it properly */
 .header-actions .ant-switch {
   margin-right: 4px;
 }
@@ -1043,193 +719,6 @@
   justify-content: center;
 }
 
-/* Mobile Layout Improvements */
-@media (max-width: 768px) {
-  /* Fixed Chat Panel */
-  .paper-analyzer-sider {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: auto;
-    max-height: 60vh !important;
-    width: 100% !important;
-    z-index: 1000;
-    border-top: 1px solid #e8e8e8;
-    border-radius: 16px 16px 0 0;
-    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-    transition: transform 0.3s ease, height 0.3s ease;
-  }
-  
-  /* Chat panel collapsed state */
-  .paper-analyzer-sider.ant-layout-sider-collapsed {
-    height: 40px !important;
-    min-width: 100% !important;
-    max-width: 100% !important;
-    width: 100% !important;
-    transform: translateY(calc(100% - 40px));
-  }
-  
-  /* Handle bar for pulling chat up/down */
-  .chat-handle-bar {
-    display: block;
-    height: 5px;
-    width: 40px;
-    background-color: #d9d9d9;
-    border-radius: 3px;
-    margin: 8px auto;
-    cursor: pointer;
-  }
-  
-  /* Adjust content area to not be covered by chat */
-  .paper-analyzer-content {
-    margin-bottom: 60px;
-    padding-bottom: 0;
-  }
-  
-  /* Document/Chat View Switcher */
-  .mobile-view-switcher {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 50px;
-    background: white;
-    display: flex;
-    z-index: 1001;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-    border-top: 1px solid #e8e8e8;
-  }
-  
-  .mobile-view-switcher button {
-    flex: 1;
-    border: none;
-    border-radius: 0;
-    height: 50px;
-  }
-  
-  /* Mobile Document Content Layout */
-  .document-content-mobile {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  
-  .mobile-doc-toggle {
-    display: flex;
-    justify-content: center;
-    margin: 8px 0;
-  }
-  
-  .mobile-doc-toggle button {
-    flex: 1;
-    max-width: 160px;
-    margin: 0 4px;
-  }
-  
-  .mobile-doc-container {
-    flex: 1;
-    overflow: hidden;
-    position: relative;
-  }
-  
-  /* Document/Translation Tab Switching */
-  .mobile-doc-container .original-content,
-  .mobile-doc-container .translated-content {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 12px;
-    transition: transform 0.3s ease;
-    width: 100%;
-    height: 100%;
-  }
-  
-  .mobile-doc-container.original .translated-content {
-    transform: translateX(100%);
-  }
-  
-  .mobile-doc-container.translated .original-content {
-    transform: translateX(-100%);
-  }
-  
-  /* Optimize header for mobile */
-  .document-header {
-    flex-wrap: wrap;
-    padding: 8px;
-    height: auto;
-    min-height: 48px;
-  }
-  
-  .header-left {
-    width: 100%;
-    margin-bottom: 8px;
-    font-size: 14px;
-  }
-  
-  .header-right {
-    width: 100%;
-    justify-content: space-between;
-  }
-  
-  .header-right .ant-select {
-    width: 60% !important;
-  }
-  
-  .header-right .ant-btn {
-    width: 35%;
-    height: 36px;
-  }
-  
-  /* View toggle transitions */
-  .paper-analyzer-content.mobile-chat-view .document-viewer {
-    display: none;
-  }
-  
-  .paper-analyzer-content.mobile-document-view .paper-analyzer-sider {
-    display: none;
-  }
-  
-  /* Improve touch targets */
-  .ant-btn {
-    min-height: 36px;
-    min-width: 36px;
-    padding: 0 12px;
-    font-size: 14px;
-  }
-  
-  /* Improve chat scrolling */
-  .chat-messages {
-    -webkit-overflow-scrolling: touch;
-  }
-  
-  /* Keyboard-aware chat input */
-  .chat-input-container {
-    position: sticky;
-    bottom: 0;
-    background: #fff;
-    z-index: 10;
-    border-top: 1px solid #f0f0f0;
-    padding: 8px;
-  }
-}
-
-/* Additional small phone optimization */
-@media (max-width: 375px) {
-  .header-right .ant-select {
-    width: 55% !important;
-  }
-  
-  .mobile-doc-toggle button {
-    font-size: 12px;
-    padding: 0 8px;
-  }
-}
-
-/* Grok-like Chat Styling */
 .session-header {
   display: flex;
   justify-content: space-between;
@@ -1388,7 +877,6 @@
   border-top: 1px solid #f0f0f0;
 }
 
-/* Empty state styling */
 .ant-empty {
   margin: 32px 0;
 }
@@ -1397,27 +885,6 @@
   color: #999;
 }
 
-/* Mobile optimization for chat sessions */
-@media (max-width: 768px) {
-  .session-item {
-    padding: 10px 12px;
-  }
-  
-  .session-title {
-    font-size: 13px;
-  }
-  
-  .session-meta, .session-preview {
-    font-size: 11px;
-  }
-  
-  .edit-title {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
-/* Add to styles.css */
 .session-documents {
   margin-top: 8px;
   display: flex;
@@ -1440,7 +907,6 @@
   color: #52c41a;
 }
 
-/* Style for session header with return button */
 .session-header {
   display: flex;
   justify-content: space-between;
@@ -1459,7 +925,6 @@
   margin-right: 8px;
 }
 
-/* Style for disabled input area when showing sessions */
 .input-area.disabled {
   background-color: #f5f5f5;
   opacity: 0.8;
@@ -1476,7 +941,6 @@
   opacity: 0.6;
 }
 
-/* Improve the sessions list */
 .sessions-list {
   flex: 1;
   overflow-y: auto;
@@ -1500,7 +964,6 @@
   border-left: 3px solid #1890ff;
 }
 
-/* Make send button show "Return to chat" text when in sessions view */
 .input-area.disabled .input-actions .ant-btn-primary {
   background-color: #1890ff;
   color: white;
@@ -1508,7 +971,6 @@
   cursor: pointer;
 }
 
-/* 添加样式 */
 .delete-session-btn {
   margin-left: 8px;
   opacity: 0.6;
@@ -1519,7 +981,6 @@
   opacity: 1;
 }
 
-/* 确保会话元信息的对齐方式 */
 .session-meta {
   display: flex;
   align-items: center;
@@ -1527,7 +988,6 @@
   gap: 10px;
 }
 
-/* 文档列表样式 */
 .session-documents-list {
   margin: 8px;
   border-radius: 6px;
@@ -1600,7 +1060,6 @@
   background-color: #e6f7ff;
 }
 
-/* Add styles for the documents popup */
 .documents-popup {
   position: absolute;
   bottom: 70px;
@@ -1671,223 +1130,18 @@
   color: #999;
 }
 
-/* Ensure the chat input container has relative position for popup positioning */
 .chat-input-container {
   position: relative;
 }
 
-/* Hide the session documents list at the bottom of the page */
 .session-documents-list {
   display: none;
 }
 
-/* Add new styles for rich content rendering */
-
-/* Rich content container */
-.rich-content-container {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* Content item styling */
-.content-item {
-  margin-bottom: 8px;
-}
-
-/* Code block container */
-.code-block-container {
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid #eee;
-  margin: 8px 0;
-}
-
-.code-block-header {
-  background-color: #f5f5f5;
-  padding: 4px 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  color: #666;
-  border-bottom: 1px solid #eee;
-}
-
-.code-language {
-  font-family: monospace;
-  font-weight: bold;
-}
-
-/* Override syntax highlighter styles */
-.code-block-container pre {
-  margin: 0 !important;
-  background-color: #fafafa !important;
-  font-size: 13px !important;
-  line-height: 1.4 !important;
-  border-radius: 0 !important;
-}
-
-/* Table styling */
-.table-container {
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-.message-table {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 14px;
-}
-
-.message-table th,
-.message-table td {
-  border: 1px solid #eee;
-  padding: 8px;
-  text-align: left;
-}
-
-.message-table th {
-  background-color: #f5f5f5;
-  font-weight: 500;
-}
-
-.message-table tr:nth-child(even) {
-  background-color: #fafafa;
-}
-
-/* Image styling */
-.image-container {
-  margin: 8px 0;
-  text-align: center;
-}
-
-.message-image {
-  max-width: 100%;
-  max-height: 400px;
-  border-radius: 6px;
-  object-fit: contain;
-}
-
-.image-caption {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #666;
-  text-align: center;
-}
-
-/* Sources styling */
-.message-sources {
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid #f0f0f0;
-  font-size: 12px;
-}
-
-.sources-header {
-  font-weight: 500;
-  margin-bottom: 4px;
-  color: #666;
-  cursor: pointer;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sources-header:hover {
-  color: #1890ff;
-}
-
-.toggle-icon {
-  font-size: 10px;
-}
-
-.sources-list {
-  margin: 8px 0 0 0;
-  padding-left: 16px;
-  border-left: 2px solid #f0f0f0;
-}
-
-.source-item {
-  margin-bottom: 8px;
-  padding: 4px 8px;
-  background-color: #f9f9f9;
-  border-radius: 4px;
-}
-
-.source-document {
-  font-weight: 500;
-  margin-right: 4px;
-  color: #1890ff;
-  display: block;
-  margin-bottom: 2px;
-}
-
-.source-content {
-  color: #333;
-  display: block;
-  font-size: 13px;
-}
-
-/* Markdown styling */
-.content-markdown {
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.content-markdown p {
-  margin: 0 0 12px;
-}
-
-.content-markdown h1,
-.content-markdown h2,
-.content-markdown h3,
-.content-markdown h4,
-.content-markdown h5,
-.content-markdown h6 {
-  margin-top: 16px;
-  margin-bottom: 8px;
-}
-
-.content-markdown ul,
-.content-markdown ol {
-  margin: 8px 0;
-  padding-left: 24px;
-}
-
-.content-markdown li {
-  margin-bottom: 4px;
-}
-
-.content-markdown code {
-  font-family: monospace;
-  background-color: #f0f0f0;
-  padding: 2px 4px;
-  border-radius: 2px;
-  font-size: 13px;
-}
-
-.content-markdown blockquote {
-  margin: 8px 0;
-  padding: 8px 16px;
-  border-left: 4px solid #ddd;
-  background-color: #f8f8f8;
-  color: #666;
-}
-
-/* Text content styling */
-.text-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* 当消息较少时，确保消息显示在底部 */
 .response-list:not(:empty) {
   justify-content: flex-end;
 }
 
-/* 添加一个滚动辅助类，仅在必要时使用 */
 .scroll-to-bottom {
   scroll-behavior: smooth;
 }
@@ -1902,105 +1156,4 @@
   height: 100%;
   overflow-y: auto;
   padding: 10px;
-}
-
-.mermaid-container {
-  background-color: white;
-  border-radius: 6px;
-  padding: 16px;
-  border: 1px solid #eee;
-  margin: 8px 0;
-  overflow: visible;
-  min-height: 200px;
-  display: flex;
-  flex-direction: column;
-}
-
-.mermaid-wrapper {
-  overflow-x: auto;
-  min-height: 200px;
-}
-
-.mermaid {
-  text-align: center;
-  min-height: 150px;
-  width: 100%;
-  font-size: 14px;
-}
-
-.mermaid svg {
-  max-width: 100%;
-  height: auto !important;
-}
-
-/* 确保表格正确渲染 */
-.table-container {
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-.message-table {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 14px;
-}
-
-.message-table th,
-.message-table td {
-  border: 1px solid #eee;
-  padding: 8px;
-  text-align: left;
-}
-
-.message-table th {
-  background-color: #f5f5f5;
-  font-weight: 500;
-}
-
-.message-table tr:nth-child(even) {
-  background-color: #fafafa;
-}
-
-/* Fallback for when mermaid fails to render */
-.mermaid-fallback {
-  margin-top: 10px;
-  border-top: 1px dashed #ccc;
-  padding-top: 10px;
-}
-
-.mermaid-fallback summary {
-  cursor: pointer;
-  color: #666;
-  font-size: 12px;
-}
-
-.mermaid-fallback pre {
-  margin-top: 8px;
-  padding: 8px;
-  background-color: #f8f8f8;
-  border-radius: 4px;
-  white-space: pre-wrap;
-  font-size: 12px;
-  overflow-x: auto;
-}
-
-/* Add error handling styles */
-.mermaid-error {
-  margin-top: 12px;
-  padding: 12px;
-  background-color: #fff2f0;
-  border: 1px solid #ffccc7;
-  border-radius: 4px;
-  color: #cf1322;
-}
-
-.mermaid-error pre {
-  margin-top: 8px;
-  padding: 8px;
-  background-color: #fff;
-  border-radius: 4px;
-  white-space: pre-wrap;
-  font-size: 13px;
-  overflow-x: auto;
-  color: #333;
 }

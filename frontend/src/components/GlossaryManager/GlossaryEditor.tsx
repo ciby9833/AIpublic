@@ -36,7 +36,8 @@ const GlossaryEditor: React.FC<GlossaryEditorProps> = ({ onSuccess }) => {
         throw new Error('Failed to create glossary');
       }
     } catch (error) {
-      message.error(t('glossary.createError'));
+      console.error('Create glossary error:', error);
+      message.error(t('glossary.createError') || 'Failed to create glossary');
     } finally {
       setLoading(false);
     }

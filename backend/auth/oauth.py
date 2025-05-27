@@ -10,6 +10,7 @@ import json
 import urllib.parse
 from datetime import datetime, timedelta
 import secrets
+import base64
 from sqlalchemy.orm import Session
 from .models import User
 from fastapi import Depends
@@ -17,11 +18,11 @@ from database import get_db
 
 router = APIRouter()
 
-FEISHU_APP_ID = os.getenv("FEISHU_APP_ID")
-FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET")
-FEISHU_REDIRECT_URI = os.getenv("FEISHU_REDIRECT_URI")
-FEISHU_TENANT_KEY = os.getenv("FEISHU_TENANT_KEY")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FEISHU_APP_ID = os.getenv("FEISHU_APP_ID")  # 飞书应用ID
+FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET")  # 飞书应用密钥
+FEISHU_REDIRECT_URI = os.getenv("FEISHU_REDIRECT_URI")  # 飞书回调URL
+FEISHU_TENANT_KEY = os.getenv("FEISHU_TENANT_KEY")  # 飞书组织ID
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")  # 前端URL
 
 # 添加常量配置飞书token过期时间
 TOKEN_EXPIRE_HOURS = 168  # token 过期时间，168小时
@@ -202,11 +203,18 @@ async def feishu_callback(code: str, state: str, db: Session = Depends(get_db)):
                     url=f"{FRONTEND_URL}/login?error=incomplete_data"
                 )
 
-            # 7. 重定向到前端
-            encoded_data = urllib.parse.quote(json.dumps(auth_data))
-            redirect_url = f"{FRONTEND_URL}/auth/callback?data={encoded_data}"
+            # 7. 使用URL参数传递认证数据并重定向到前端
+            auth_data_json = json.dumps(auth_data, ensure_ascii=False)
+            # 使用 base64 编码避免特殊字符问题
+            auth_data_encoded = base64.b64encode(auth_data_json.encode('utf-8')).decode('ascii')
+            # 使用URL参数传递，避免Cookie跨域问题
+            redirect_url = f"{FRONTEND_URL}/auth/callback?data={auth_data_encoded}"
             
             logger.info("Authentication successful, redirecting to frontend")
+            logger.info(f"Encoded auth data length: {len(auth_data_encoded)}")
+            logger.info(f"Encoded auth data preview: {auth_data_encoded[:100]}...")
+            logger.info(f"Redirect URL: {redirect_url}")
+            
             return RedirectResponse(url=redirect_url)
 
     except Exception as e:
@@ -218,8 +226,20 @@ async def feishu_callback(code: str, state: str, db: Session = Depends(get_db)):
 
 # 刷新token
 @router.get("/api/auth/refresh")
-async def refresh_token(current_token: str, db: Session = Depends(get_db)):
+async def refresh_token(
+    current_token: str = None,
+    db: Session = Depends(get_db)
+):
     try:
+        # 优先从查询参数获取token，如果没有则从依赖注入获取
+        if not current_token:
+            # 这里可以添加从请求头获取token的逻辑
+            # 但为了兼容性，暂时保持查询参数方式
+            return JSONResponse(
+                status_code=400,
+                content={"error": "No token provided"}
+            )
+        
         # 查找用户
         user = db.query(User).filter(User.access_token == current_token).first()
         if not user:
@@ -241,6 +261,8 @@ async def refresh_token(current_token: str, db: Session = Depends(get_db)):
         # 更新用户token过期时间
         user.token_expires_at = new_expires_at
         db.commit()
+        
+        logger.info(f"Token refreshed for user: {user.name}, new expires_at: {new_expires_at}")
         
         return {
             "expires_at": new_expires_at.timestamp()

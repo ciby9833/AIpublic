@@ -238,7 +238,11 @@ const GlossaryDatabaseSearch: React.FC = () => {
       if (result.entries.length === 0 && currentPage > 1) {
         currentPage = result.total_pages || 1;
         const newResult = await glossaryApi.searchGlossaries({
-          ...values,
+          name: values.name,
+          startDate: startDate?.format('YYYY-MM-DD'),
+          endDate: endDate?.format('YYYY-MM-DD'),
+          sourceLang: values.sourceLang,
+          targetLang: values.targetLang,
           page: currentPage,
           pageSize: pagination.pageSize
         });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Input, Button, Spin, Modal, Upload, List, message } from 'antd';
+import { Input, Button, Spin, Modal, Upload, List, message, Tooltip } from 'antd';
 import { 
   SendOutlined,
   MenuOutlined, 
@@ -13,8 +13,13 @@ import {
   DeleteOutlined,
   EditOutlined,
   CloseOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  PaperClipOutlined,
+  FileOutlined,
+  CopyOutlined,
+  CheckOutlined
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { aiChatService } from '../../services/aiChatService';
 import { ApiChatMessage, ChatSession, StreamingState } from '../../types/chat';
 import { MessagesResponse } from '../../services/aiChatService';
@@ -26,6 +31,7 @@ const { TextArea } = Input;
 
 const MobileChat: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [messageText, setMessageText] = useState<string>('');
   const [messages, setMessages] = useState<ApiChatMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -34,7 +40,7 @@ const MobileChat: React.FC = () => {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [showSessions, setShowSessions] = useState<boolean>(false);
   const [showMenu, setShowMenu] = useState<boolean>(false);
-  const [sessionTitle, setSessionTitle] = useState<string>('新对话');
+  const [sessionTitle, setSessionTitle] = useState<string>(t('mobileChat.newChat'));
   const [editingTitle, setEditingTitle] = useState<boolean>(false);
   const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
   const [lastMessageId, setLastMessageId] = useState<string | null>(null);
@@ -48,6 +54,12 @@ const MobileChat: React.FC = () => {
     partialMessage: ''
   });
   const [isComposing, setIsComposing] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
 
   // 页面加载时获取最新的会话
   useEffect(() => {
@@ -68,25 +80,25 @@ const MobileChat: React.FC = () => {
             setLastMessageId((chatMessages[0] as unknown as ApiChatMessage)?.id ?? null);
             
             setCurrentSessionId(latestSession.id);
-            setSessionTitle(latestSession.title || "未命名会话");
+            setSessionTitle(latestSession.title || t('mobileChat.unnamedSession'));
             
             // 自动滚动到最新消息
             setTimeout(() => scrollToBottom(0), 300);
           } catch (sessionError) {
-            console.error("加载会话失败:", sessionError);
-            message.error("加载最新会话失败，已创建新对话");
-            setSessionTitle("新对话");
+            console.error(t('mobileChat.loadSessionFailed'), sessionError);
+            message.error(t('mobileChat.loadLatestSessionFailed'));
+            setSessionTitle(t('mobileChat.newChat'));
             setMessages([]);
             setCurrentSessionId("");
           }
         } else {
-          setSessionTitle("新对话");
+          setSessionTitle(t('mobileChat.newChat'));
           setMessages([]);
           setCurrentSessionId("");
         }
       } catch (error) {
-        console.error("自动加载会话失败:", error);
-        message.error("加载会话列表失败");
+        console.error(t('mobileChat.loadSessionListFailed'), error);
+        message.error(t('mobileChat.loadSessionListFailed'));
       } finally {
         setLoading(false);
       }
@@ -104,10 +116,257 @@ const MobileChat: React.FC = () => {
     }, delay);
   };
 
+  // 智能滚动 - 专门处理键盘弹出时的滚动
+  const smartScroll = () => {
+    if (!chatContainerRef.current || !messagesEndRef.current) return;
+    
+    const container = chatContainerRef.current;
+    
+    // 简化滚动逻辑，直接滚动到底部
+    setTimeout(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth'
+      });
+    }, 100);
+  };
+
+  // 处理文件上传
+  const handleFileUpload = async (file: File) => {
+    try {
+      setUploading(true);
+      console.log(`[MOBILE_CHAT] Starting file upload: ${file.name}, size: ${file.size} bytes`);
+      
+      // 确保有会话ID
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        try {
+          const sessionTitle = `${t('mobileChat.fileUploaded').replace('{{filename}}', file.name)}`;
+          // 创建纯AI会话，稍后添加文档
+          const newSession = await aiChatService.createAiOnlySession(sessionTitle);
+          
+          if (newSession && newSession.id) {
+            sessionId = newSession.id;
+            setCurrentSessionId(sessionId);
+            setSessionTitle(sessionTitle);
+          } else {
+            throw new Error(t('mobileChat.createSessionFailed'));
+          }
+        } catch (error) {
+          console.error(t('mobileChat.createSessionFailed'), error);
+          message.error(t('mobileChat.createSessionFailed'));
+          setUploading(false);
+          return;
+        }
+      }
+
+      // 上传并分析文档
+      const result = await aiChatService.uploadDocument(file, sessionId);
+      
+      if (result.status === 'success' && result.paper_id) {
+        console.log(`[MOBILE_CHAT] Document uploaded successfully, paper_id: ${result.paper_id}`);
+        
+        // 检查文档是否已自动添加到会话
+        const wasAddedToSession = result && 'added_to_session' in result 
+          ? Boolean(result.added_to_session) 
+          : false;
+        
+        if (!wasAddedToSession) {
+          // 只有在文档没有自动添加到会话时才手动添加
+          try {
+            await aiChatService.addDocumentToSession(sessionId, result.paper_id);
+            console.log(`[MOBILE_CHAT] Document manually added to session: ${sessionId}`);
+          } catch (error: any) {
+            console.error(t('mobileChat.uploadFailed'), error);
+            if (error.message && error.message.includes("一个会话最多支持10个文档")) {
+              message.error(t('mobileChat.sessionLimitReached'));
+              return;
+            } else if (error.message && error.message.includes("该文档已添加到会话中")) {
+              console.log(t('mobileChat.documentAlreadyInSession'));
+            } else {
+              // 其他错误仍然抛出
+              throw error;
+            }
+          }
+        } else {
+          console.log(`[MOBILE_CHAT] Document was automatically added to session: ${sessionId}`);
+        }
+
+        // 发送文档分析完成的消息
+        const analysisMessage = t('mobileChat.fileAnalysisComplete', { filename: file.name });
+        
+        // 添加用户消息到UI
+        const tempUserMessage: ApiChatMessage = {
+          id: `temp-upload-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          role: 'user',
+          content: t('mobileChat.fileUploaded', { filename: file.name }),
+          created_at: new Date().toISOString(),
+          sources: [],
+          confidence: 0,
+          reply: [{
+            type: 'markdown',
+            content: `📎 ${t('mobileChat.fileUploaded', { filename: file.name })}`
+          }]
+        };
+        
+        setMessages(prev => [...prev, tempUserMessage]);
+        
+        // 开始流式状态
+        setStreamingState({
+          isStreaming: true,
+          partialMessage: ''
+        });
+        
+        // 使用流式API发送分析完成消息
+        await aiChatService.streamMessage(
+          sessionId,
+          analysisMessage,
+          {
+            onChunk: (chunk) => {
+              if (chunk && chunk.delta) {
+                setStreamingState(prev => ({
+                  isStreaming: true,
+                  partialMessage: prev.partialMessage + chunk.delta,
+                  messageId: chunk.message_id || prev.messageId
+                }));
+                scrollToBottom();
+              }
+            },
+            onComplete: async () => {
+              // 重置流式状态
+              setStreamingState({
+                isStreaming: false,
+                partialMessage: ''
+              });
+              
+              // 获取完整的消息列表
+              try {
+                const updatedMessages = await aiChatService.getMessages(sessionId, 20);
+                if (updatedMessages && updatedMessages.messages) {
+                  setMessages((updatedMessages.messages || []) as unknown as ApiChatMessage[]);
+                  setHasMoreMessages(Boolean(updatedMessages.has_more));
+                  if (updatedMessages.messages.length > 0) {
+                    setLastMessageId((updatedMessages.messages[0] as unknown as ApiChatMessage)?.id ?? null);
+                  }
+                }
+              } catch (err) {
+                console.error(t('mobileChat.loadSessionFailed'), err);
+              }
+              
+              scrollToBottom();
+              setUploading(false);
+            },
+            onError: (error) => {
+              const errorMessage = typeof error === 'string' ? error : 
+                                  error?.message || t('mobileChat.unknownError');
+              console.error(t('mobileChat.documentAnalysisFailed'), error);
+              message.error(t('mobileChat.documentAnalysisFailed', { message: errorMessage }));
+              setStreamingState({
+                isStreaming: false,
+                partialMessage: ''
+              });
+              setUploading(false);
+            }
+          }
+        );
+        
+        message.success(t('mobileChat.documentUploadSuccess'));
+        setSelectedFile(null);
+      } else {
+        message.error(t('mobileChat.documentAnalysisFailed2'));
+        setUploading(false);
+      }
+    } catch (error: any) {
+      console.error('[MOBILE_CHAT] File upload failed:', error);
+      
+      if (error.message && error.message.includes("一个会话最多支持10个文档")) {
+        message.error(t('mobileChat.sessionLimitReached'));
+      } else {
+        message.error(t('mobileChat.uploadFailed'));
+      }
+      setUploading(false);
+    }
+  };
+
+  // 处理拖拽上传
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      
+      // 检查文件大小 (限制为50MB)
+      const maxSize = 50 * 1024 * 1024; // 50MB
+      if (file.size > maxSize) {
+        message.error(t('mobileChat.fileSizeLimit'));
+        return;
+      }
+      
+      // 检查文件类型
+      const allowedTypes = ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.txt', '.md'];
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+      
+      if (allowedTypes.includes(fileExtension)) {
+        setSelectedFile(file);
+        message.success(t('mobileChat.fileSelected', { filename: file.name }));
+      } else {
+        message.error(t('mobileChat.unsupportedFileType'));
+      }
+    }
+  };
+
+  // 复制消息内容
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    try {
+      setCopyingMessageId(messageId);
+      
+      // 清理markdown格式，提取纯文本
+      const cleanContent = content
+        .replace(/```[\s\S]*?```/g, (match) => match.replace(/```\w*\n?/g, '').replace(/```/g, ''))
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/#{1,6}\s+/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .trim();
+      
+      await navigator.clipboard.writeText(cleanContent);
+      message.success(t('mobileChat.copied'));
+      
+      // 2秒后重置复制状态
+      setTimeout(() => setCopyingMessageId(null), 2000);
+    } catch (error) {
+      console.error(t('mobileChat.copyFailed'), error);
+      message.error(t('mobileChat.copyFailed'));
+      setCopyingMessageId(null);
+    }
+  };
+
   // 发送消息
   const handleSendMessage = async () => {
-    if (!messageText.trim()) {
+    if (!messageText.trim() && !selectedFile) {
       return;
+    }
+
+    // 如果有选中的文件，先上传文件
+    if (selectedFile) {
+      await handleFileUpload(selectedFile);
+      // 上传完成后，如果没有消息文本，就结束
+      if (!messageText.trim()) {
+        return;
+      }
     }
 
     const userMessage = messageText;
@@ -127,13 +386,13 @@ const MobileChat: React.FC = () => {
           if (newSession && newSession.id) {
             sessionId = newSession.id;
             setCurrentSessionId(sessionId);
-            setSessionTitle(newSession.title || '新对话');
+            setSessionTitle(newSession.title || t('mobileChat.newChat'));
           } else {
-            throw new Error('创建会话失败');
+            throw new Error(t('mobileChat.createSessionFailed'));
           }
         } catch (error) {
-          console.error("创建会话失败:", error);
-          message.error('创建会话失败');
+          console.error(t('mobileChat.createSessionFailed'), error);
+          message.error(t('mobileChat.createSessionFailed'));
           setSending(false);
           return;
         }
@@ -194,7 +453,7 @@ const MobileChat: React.FC = () => {
                 }
               }
             } catch (err) {
-              console.error("获取消息失败:", err);
+              console.error(t('mobileChat.loadSessionFailed'), err);
             }
             
             scrollToBottom();
@@ -202,9 +461,9 @@ const MobileChat: React.FC = () => {
           },
           onError: (error) => {
             const errorMessage = typeof error === 'string' ? error : 
-                                error?.message || '未知错误';
-            console.error("消息流处理失败:", error);
-            message.error(`发送失败: ${errorMessage}`);
+                                error?.message || t('mobileChat.unknownError');
+            console.error(t('mobileChat.sendFailed'), error);
+            message.error(t('mobileChat.sendFailed'));
             setStreamingState({
               isStreaming: false,
               partialMessage: ''
@@ -214,8 +473,8 @@ const MobileChat: React.FC = () => {
         }
       );
     } catch (error) {
-      console.error("发送消息失败:", error);
-      message.error('发送失败，请重试');
+      console.error(t('mobileChat.sendFailed'), error);
+      message.error(t('mobileChat.sendFailed'));
       setSending(false);
     }
   };
@@ -248,8 +507,8 @@ const MobileChat: React.FC = () => {
         setHasMoreMessages(false);
       }
     } catch (error) {
-      console.error('加载更多消息失败:', error);
-      message.error('加载更多消息失败');
+      console.error(t('mobileChat.loadingMore'), error);
+      message.error(t('mobileChat.loadingMore'));
     } finally {
       setIsLoadingMore(false);
     }
@@ -274,11 +533,11 @@ const MobileChat: React.FC = () => {
         setSessions(sessionList);
       } else {
         console.error('Invalid session list format:', sessionList);
-        message.error('获取对话历史格式错误');
+        message.error(t('mobileChat.loadSessionFailed'));
       }
     } catch (error) {
-      console.error('获取会话失败:', error);
-      message.error('获取会话失败');
+      console.error(t('mobileChat.loadSessionFailed'), error);
+      message.error(t('mobileChat.loadSessionFailed'));
     }
   };
 
@@ -290,8 +549,8 @@ const MobileChat: React.FC = () => {
       setShowSessions(true);
       setShowMenu(false);
     } catch (error) {
-      console.error("获取会话历史失败:", error);
-      message.error('获取会话历史失败');
+      console.error(t('mobileChat.loadSessionFailed'), error);
+      message.error(t('mobileChat.loadSessionFailed'));
     } finally {
       setLoading(false);
     }
@@ -316,7 +575,7 @@ const MobileChat: React.FC = () => {
       // 更新sessionTitle
       const currentSession = sessions.find(s => s.id === sessionId);
       if (currentSession) {
-        setSessionTitle(currentSession.title || '无标题会话');
+        setSessionTitle(currentSession.title || t('mobileChat.unnamedSession'));
       }
       
       // 设置消息内容
@@ -338,8 +597,8 @@ const MobileChat: React.FC = () => {
       // 滚动到底部
       scrollToBottom(300);
     } catch (error) {
-      console.error('加载对话历史失败:', error);
-      message.error('加载对话历史失败');
+      console.error(t('mobileChat.loadSessionFailed'), error);
+      message.error(t('mobileChat.loadSessionFailed'));
     } finally {
       setLoading(false);
     }
@@ -349,7 +608,7 @@ const MobileChat: React.FC = () => {
   const handleNewChat = () => {
     // 如果当前没有消息且没有会话ID，则不需要创建新会话
     if (messages.length === 0 && !currentSessionId) {
-      console.log("当前已经是空白新会话，无需创建");
+      console.log(t('mobileChat.alreadyNewChat'));
       setShowSessions(false);
       setShowMenu(false);
       return;
@@ -358,7 +617,7 @@ const MobileChat: React.FC = () => {
     // 清除当前会话和消息
     setCurrentSessionId("");
     setMessages([]);
-    setSessionTitle("新对话");
+    setSessionTitle(t('mobileChat.newChat'));
     setShowSessions(false);
     setShowMenu(false);
   };
@@ -391,16 +650,16 @@ const MobileChat: React.FC = () => {
       if (sessionToDelete === currentSessionId) {
         setCurrentSessionId("");
         setMessages([]);
-        setSessionTitle("新对话");
+        setSessionTitle(t('mobileChat.newChat'));
         setShowSessions(false);
       }
       
-      message.success('会话已删除');
+      message.success(t('mobileChat.sessionDeleted'));
     } catch (error: any) {
       // 安全地提取错误消息
-      const errorMessage = error?.message || '未知错误';
-      message.error(`删除失败: ${errorMessage}`);
-      console.error('删除会话失败:', error);
+      const errorMessage = error?.message || t('mobileChat.unknownError');
+      message.error(t('mobileChat.deleteSessionFailed', { message: errorMessage }));
+      console.error(t('mobileChat.deleteSessionFailed'), error);
     } finally {
       setDeleteModalVisible(false);
       setSessionToDelete(null);
@@ -421,7 +680,7 @@ const MobileChat: React.FC = () => {
       
       // 检查结果格式并显示消息
       if (result && result.status === 'success') {
-        message.success('会话标题已更新');
+        message.success(t('mobileChat.titleUpdated'));
         
         // 更新会话列表中的标题
         setSessions(sessions.map(session => 
@@ -430,15 +689,15 @@ const MobileChat: React.FC = () => {
             : session
         ));
       } else {
-        message.success('标题已更新');
+        message.success(t('mobileChat.titleUpdated'));
       }
       
       setEditingTitle(false);
     } catch (error: any) {
       // 使用安全的错误消息提取方式
-      const errorMessage = error?.message || '未知错误';
-      message.error(`保存标题失败: ${errorMessage}`);
-      console.error('保存标题失败:', error);
+      const errorMessage = error?.message || t('mobileChat.unknownError');
+      message.error(t('mobileChat.updateTitleFailed', { message: errorMessage }));
+      console.error(t('mobileChat.updateTitleFailed'), error);
       setEditingTitle(false);
     }
   };
@@ -463,7 +722,7 @@ const MobileChat: React.FC = () => {
       const expiresAt = localStorage.getItem('expires_at');
       
       if (!accessToken || !expiresAt) {
-        handleGracefulLogout('登录信息已失效，请重新登录');
+        handleGracefulLogout(t('mobileChat.loginExpired'));
         return;
       }
       
@@ -472,7 +731,7 @@ const MobileChat: React.FC = () => {
       
       // 提前5分钟检测到过期，给用户友好提示
       if (now >= expiresTime - 300) { // 5分钟预警
-        handleGracefulLogout('登录即将过期，请保存重要内容');
+        handleGracefulLogout(t('mobileChat.loginExpiring'));
       }
     };
     
@@ -494,9 +753,9 @@ const MobileChat: React.FC = () => {
     
     // 使用modal而不是message，确保用户看到
     Modal.warning({
-      title: '登录状态提示',
+      title: t('mobileChat.loginStatusWarning'),
       content: msg,
-      okText: '确定',
+      okText: t('mobileChat.confirm'),
       onOk: () => {
         authApi.logout();
       }
@@ -526,8 +785,73 @@ const MobileChat: React.FC = () => {
     }
   }, [streamingState]);
 
+  // 键盘弹出检测和处理
+  useEffect(() => {
+    let initialViewportHeight = window.visualViewport?.height || window.innerHeight;
+    let keyboardHeight = 0;
+    
+    const handleViewportChange = () => {
+      if (window.visualViewport) {
+        const currentHeight = window.visualViewport.height;
+        const heightDifference = initialViewportHeight - currentHeight;
+        
+        // 如果高度差超过150px，认为键盘弹出了
+        const isKeyboardOpen = heightDifference > 150;
+        keyboardHeight = isKeyboardOpen ? heightDifference : 0;
+        
+        setKeyboardOpen(isKeyboardOpen);
+        
+        // 移除手动高度计算，让CSS flexbox处理布局
+        
+                 // 键盘弹出时智能滚动
+        if (isKeyboardOpen && inputFocused) {
+          // 延迟滚动，确保布局调整完成
+          setTimeout(() => {
+            smartScroll();
+          }, 200);
+        }
+      }
+    };
+
+    const handleResize = () => {
+      // 更新初始视口高度（仅在键盘收起时）
+      if (!keyboardOpen) {
+        initialViewportHeight = window.visualViewport?.height || window.innerHeight;
+      }
+      handleViewportChange();
+    };
+
+    // 监听视口变化
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportChange);
+    }
+    
+    // 监听窗口大小变化（兼容性处理）
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleViewportChange);
+      }
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [keyboardOpen, inputFocused]);
+
+  // 清理函数
+  useEffect(() => {
+    return () => {
+      // 组件卸载时清理选中的文件
+      setSelectedFile(null);
+    };
+  }, []);
+
   return (
-    <div className="x-chat-container">
+    <div 
+      className={`x-chat-container ${keyboardOpen ? 'keyboard-open' : ''} ${dragOver ? 'drag-over' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* 头部导航区 */}
       <div className="x-chat-header">
         {showSessions ? (
@@ -538,7 +862,7 @@ const MobileChat: React.FC = () => {
               onClick={() => setShowSessions(false)}
               className="x-back-button"
             />
-            <div className="x-header-title">会话历史</div>
+            <div className="x-header-title">{t('mobileChat.sessionHistory')}</div>
           </div>
         ) : (
           <>
@@ -561,7 +885,7 @@ const MobileChat: React.FC = () => {
                   </div>
                 ) : (
                   <div className="x-title-display">
-                    <span>{sessionTitle || "新对话"}</span>
+                    <span>{sessionTitle || t('mobileChat.newChat')}</span>
                     {currentSessionId && <EditOutlined className="x-edit-icon" />}
                   </div>
                 )}
@@ -580,10 +904,10 @@ const MobileChat: React.FC = () => {
               <div className="x-menu-dropdown">
                 <div className="x-menu-items">
                   <div className="x-menu-item" onClick={handleNewChat}>
-                    <PlusOutlined /> 新建对话
+                    <PlusOutlined /> {t('mobileChat.newConversation')}
                   </div>
                   <div className="x-menu-item" onClick={showSessionHistory}>
-                    <HistoryOutlined /> 历史会话
+                    <HistoryOutlined /> {t('mobileChat.sessionHistory')}
                   </div>
                 </div>
                 <div className="x-menu-overlay" onClick={() => setShowMenu(false)} />
@@ -612,7 +936,7 @@ const MobileChat: React.FC = () => {
                       <div className="x-session-info">
                         <div className="x-session-name">
                           {session.is_ai_only ? <RobotOutlined className="x-session-icon" /> : <FileTextOutlined className="x-session-icon" />}
-                          <span>{session.title || "未命名会话"}</span>
+                          <span>{session.title || t('mobileChat.unnamedSession')}</span>
                         </div>
                         <div className="x-session-meta">
                           <span className="x-session-time">
@@ -625,7 +949,7 @@ const MobileChat: React.FC = () => {
                           </span>
                         </div>
                       </div>
-                      <div className="x-session-preview">{session.last_message || "空会话"}</div>
+                      <div className="x-session-preview">{session.last_message || t('mobileChat.emptySession')}</div>
                       <Button
                         type="text"
                         danger
@@ -642,13 +966,13 @@ const MobileChat: React.FC = () => {
               !loading && (
                 <div className="x-empty-sessions">
                   <div className="x-empty-icon"><RobotOutlined /></div>
-                  <div className="x-empty-text">暂无会话历史</div>
+                  <div className="x-empty-text">{t('mobileChat.noSessions')}</div>
                   <Button 
                     type="primary" 
                     onClick={handleNewChat}
                     className="x-create-button"
                   >
-                    创建新会话
+                    {t('mobileChat.createNewSession')}
                   </Button>
                 </div>
               )
@@ -663,15 +987,15 @@ const MobileChat: React.FC = () => {
           >
             {isLoadingMore && (
               <div className="x-loading-more">
-                <Spin size="small" /> 加载更多消息...
+                <Spin size="small" /> {t('mobileChat.loadingMore')}
               </div>
             )}
             
             {messages.length === 0 && !loading && (
               <div className="x-welcome">
                 <div className="x-welcome-icon"><RobotOutlined /></div>
-                <h3>Cargo AI助手</h3>
-                <p>有任何问题都可以向我提问</p>
+                <h3>{t('mobileChat.title')}</h3>
+                <p>{t('mobileChat.askAnything')}</p>
               </div>
             )}
             
@@ -684,12 +1008,28 @@ const MobileChat: React.FC = () => {
                   <div className="x-message-avatar">
                     {msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
                   </div>
-                  <div className="x-message-bubble">
-                    <div className="x-message-text">
-                      <ReactMarkdown>
-                        {msg.content}
-                      </ReactMarkdown>
+                  <div className="x-message-content">
+                    <div className="x-message-bubble">
+                      <div className="x-message-text">
+                        <ReactMarkdown>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
                     </div>
+                    {/* 复制按钮 - 只在AI回复时显示，放在消息框外部底部 */}
+                    {msg.role === 'assistant' && (
+                      <div className="x-copy-button-container">
+                        <Tooltip title={copyingMessageId === msg.id ? t('mobileChat.copied') : t('mobileChat.copyMessage')}>
+                          <button 
+                            className="x-copy-button" 
+                            onClick={() => handleCopyMessage(msg.id || '', msg.content)}
+                            disabled={copyingMessageId === msg.id}
+                          >
+                            {copyingMessageId === msg.id ? <CheckOutlined /> : <CopyOutlined />}
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -710,9 +1050,15 @@ const MobileChat: React.FC = () => {
                 </div>
               )}
               
-              {sending && !streamingState.isStreaming && (
+              {uploading && (
                 <div className="x-thinking">
-                  <Spin size="small" /> <span>AI正在思考...</span>
+                  <Spin size="small" /> <span>{t('mobileChat.uploading')}</span>
+                </div>
+              )}
+              
+              {sending && !streamingState.isStreaming && !uploading && (
+                <div className="x-thinking">
+                  <Spin size="small" /> <span>{t('mobileChat.thinking')}</span>
                 </div>
               )}
               
@@ -724,30 +1070,117 @@ const MobileChat: React.FC = () => {
 
       {/* 底部输入区域 - 只在聊天视图时显示 */}
       {!showSessions && (
-        <div className="x-chat-footer">
+        <div className={`x-chat-footer ${inputFocused ? 'x-input-focused' : ''}`}>
+          {/* 文件选择显示区域 */}
+          {selectedFile && (
+            <div className="x-selected-file">
+              <div className="x-file-info">
+                <FileOutlined />
+                <span className="x-file-name">{selectedFile.name}</span>
+                <span className="x-file-size">
+                  ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                </span>
+              </div>
+              <Button
+                type="text"
+                icon={<CloseOutlined />}
+                size="small"
+                onClick={() => setSelectedFile(null)}
+                className="x-remove-file"
+              />
+            </div>
+          )}
+          
           <div className="x-input-container">
-            <TextArea
-              value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
-              placeholder="输入消息..."
-              autoSize={{ minRows: 1, maxRows: 4 }}
-              onCompositionStart={() => setIsComposing(true)}
-              onCompositionEnd={() => setIsComposing(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !isComposing && !sending) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              disabled={sending}
-              className="x-input"
-            />
+            <div className="x-input-wrapper">
+              <TextArea
+                value={messageText}
+                onChange={(e) => {
+                  setMessageText(e.target.value);
+                  // 输入时保持滚动位置
+                  if (keyboardOpen && inputFocused) {
+                    setTimeout(() => smartScroll(), 50);
+                  }
+                }}
+                placeholder={selectedFile ? t('mobileChat.inputPlaceholderWithFile') : t('mobileChat.inputPlaceholder')}
+                autoSize={{ minRows: 1, maxRows: 4 }}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={() => setIsComposing(false)}
+                onFocus={() => {
+                  setInputFocused(true);
+                  // 延迟滚动，等待键盘完全弹出和布局调整完成
+                  setTimeout(() => {
+                    smartScroll();
+                  }, 400);
+                }}
+                onBlur={() => {
+                  setInputFocused(false);
+                  // 延迟重置，避免快速切换时的闪烁
+                  setTimeout(() => {
+                    if (!document.activeElement?.classList.contains('x-input')) {
+                      setKeyboardOpen(false);
+                    }
+                  }, 100);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !isComposing && !sending && !uploading) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                disabled={sending || uploading}
+                className="x-input"
+                style={{
+                  fontSize: '16px', // 确保字体大小足够大
+                  WebkitAppearance: 'none', // 移除iOS默认样式
+                }}
+              />
+              
+              {/* 文件上传按钮 */}
+              <Upload
+                accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md"
+                maxCount={1}
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  // 检查文件大小 (限制为50MB)
+                  const maxSize = 50 * 1024 * 1024; // 50MB
+                  if (file.size > maxSize) {
+                    message.error(t('mobileChat.fileSizeLimit'));
+                    return false;
+                  }
+                  
+                  // 检查文件类型
+                  const allowedTypes = ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.txt', '.md'];
+                  const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+                  
+                  if (!allowedTypes.includes(fileExtension)) {
+                    message.error(t('mobileChat.unsupportedFileType'));
+                    return false;
+                  }
+                  
+                  setSelectedFile(file);
+                  message.success(t('mobileChat.fileSelected', { filename: file.name }));
+                  return false; // 阻止自动上传
+                }}
+                disabled={sending || uploading}
+              >
+                <Tooltip title={uploading ? t('mobileChat.uploading') : t('mobileChat.uploadFile')}>
+                  <Button
+                    type="text"
+                    icon={<PaperClipOutlined />}
+                    disabled={sending || uploading}
+                    className="x-upload-button"
+                  />
+                </Tooltip>
+              </Upload>
+            </div>
+            
             <Button
               type="primary"
               icon={<SendOutlined />}
               onClick={handleSendMessage}
-              loading={sending}
-              disabled={!messageText.trim()}
+              loading={sending || uploading}
+              disabled={!messageText.trim() && !selectedFile}
               className="x-send-button"
             />
           </div>
@@ -756,17 +1189,17 @@ const MobileChat: React.FC = () => {
 
       {/* 删除确认弹窗 */}
       <Modal
-        title="确认删除"
+        title={t('mobileChat.confirmDelete')}
         open={deleteModalVisible}
         onOk={confirmDeleteSession}
         onCancel={cancelDeleteSession}
-        okText="删除"
-        cancelText="取消"
+        okText={t('mobileChat.delete')}
+        cancelText={t('mobileChat.cancel')}
         okButtonProps={{ danger: true }}
         closeIcon={<CloseOutlined />}
         className="x-delete-modal"
       >
-        <p>确定要删除这个会话吗？此操作不可恢复。</p>
+        <p>{t('mobileChat.deleteConfirmText')}</p>
       </Modal>
 
       {/* 全局加载状态 */}

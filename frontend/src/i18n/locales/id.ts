@@ -1,6 +1,8 @@
 export default {
   translation: {
-    title: 'Cargo Tool',
+    title: 'Cargo AI',
+    logout: 'Keluar',
+    loading: 'Memuat...',
     useGlossary: 'Gunakan Tabel Istilah',
     sourceLanguage: 'Bahasa Sumber',
     targetLanguage: 'Bahasa Tujuan',
@@ -83,7 +85,10 @@ export default {
     },
     tabs: {
       translation: "Terjemahan",
-      glossaryManagement: "Pengelolaan Glosarium"
+      glossaryManagement: "Pengelolaan Glosarium",
+      userManagement: "Manajemen Pengguna",
+      distanceCalculator: "Kalkulator Jarak",
+      paperAnalyzer: "AI Robot & Terjemahan"
     },
     glossary: {
       information: "Informasi Glosarium",
@@ -133,6 +138,155 @@ export default {
       filename: 'terjemahan_{{filename}}',
       preparing: 'Menyiapkan unduhan...',
       completed: 'Unduhan selesai'
+    },
+    mobileChat: {
+      title: "Asisten AI Cargo",
+      newChat: "Obrolan Baru",
+      newConversation: "Percakapan Baru",
+      chatHistory: "Riwayat Obrolan",
+      sessionHistory: "Riwayat Sesi",
+      noSessions: "Tidak ada riwayat obrolan",
+      createNewSession: "Buat Sesi Baru",
+      unnamedSession: "Sesi Tanpa Nama",
+      emptySession: "Sesi Kosong",
+      confirmDelete: "Konfirmasi Hapus",
+      deleteConfirmText: "Apakah Anda yakin ingin menghapus sesi ini? Tindakan ini tidak dapat dibatalkan.",
+      delete: "Hapus",
+      cancel: "Batal",
+      inputPlaceholder: "Ketik pesan...",
+      inputPlaceholderWithFile: "Tambahkan pesan (opsional)...",
+      thinking: "AI sedang berpikir...",
+      uploading: "Mengunggah dokumen...",
+      loadingMore: "Memuat lebih banyak pesan...",
+      copied: "Disalin",
+      copyMessage: "Salin pesan",
+      copyFailed: "Gagal menyalin, silakan pilih teks secara manual untuk disalin",
+      uploadFile: "Unggah file",
+      fileSelected: "File dipilih: {{filename}}",
+      fileSizeLimit: "Ukuran file tidak boleh melebihi 50MB",
+      unsupportedFileType: "Jenis file tidak didukung, silakan pilih file PDF, Word, PowerPoint, Excel, teks atau Markdown",
+      sessionLimitReached: "Sesi saat ini telah mencapai batas dokumen (10), silakan buat sesi baru",
+      createSessionFailed: "Gagal membuat sesi",
+      uploadFailed: "Gagal mengunggah dokumen",
+      sendFailed: "Gagal mengirim, silakan coba lagi",
+      loadSessionFailed: "Gagal memuat riwayat obrolan",
+      loadLatestSessionFailed: "Gagal memuat sesi terbaru, membuat obrolan baru",
+      loadSessionListFailed: "Gagal memuat daftar sesi",
+      deleteSessionFailed: "Gagal menghapus: {{message}}",
+      sessionDeleted: "Sesi dihapus",
+      titleUpdated: "Judul sesi diperbarui",
+      updateTitleFailed: "Gagal menyimpan judul: {{message}}",
+      loginExpired: "Informasi login telah kedaluwarsa, silakan login kembali",
+      loginExpiring: "Login akan segera kedaluwarsa, silakan simpan konten penting",
+      loginStatusWarning: "Peringatan Status Login",
+      fileAnalysisComplete: "File {{filename}} telah berhasil dianalisis, Anda dapat mulai bertanya",
+      fileUploaded: "File diunggah: {{filename}}",
+      documentAnalysisFailed: "Analisis dokumen gagal: {{message}}",
+      documentUploadSuccess: "Dokumen berhasil diunggah",
+      documentAnalysisFailed2: "Analisis dokumen gagal",
+      dragFileHere: "Seret file ke sini untuk mengunggah",
+      askAnything: "Silakan tanyakan apa saja kepada saya",
+      unknownError: "Kesalahan yang tidak diketahui",
+      documentAlreadyInSession: "Dokumen sudah ada dalam sesi, langkah penambahan dokumen dilewati",
+      alreadyNewChat: "Obrolan saat ini sudah kosong, tidak perlu membuat obrolan baru",
+      confirm: "Konfirmasi"
+    },
+    paperAnalyzer: {
+      title: "AI Tanya Jawab & Terjemahan",
+      newChat: "Obrolan Baru",
+      chatHistory: "Riwayat Obrolan",
+      returnToChat: "Kembali ke Obrolan Saat Ini",
+      newConversation: "Percakapan Baru",
+      sessionTitle: "Judul Sesi",
+      unnamedSession: "Sesi Tanpa Nama",
+      editTitle: "Edit Judul",
+      saveTitle: "Simpan",
+      deleteSession: "Hapus Obrolan",
+      confirmDelete: "Konfirmasi Hapus",
+      deleteConfirmText: "Apakah Anda yakin ingin menghapus obrolan ini? Tindakan ini tidak dapat dibatalkan.",
+      delete: "Hapus",
+      cancel: "Batal",
+      sessionDeleted: "Obrolan dihapus",
+      createSessionFailed: "Gagal membuat obrolan",
+      loadSessionFailed: "Gagal memuat riwayat obrolan",
+      deleteSessionFailed: "Gagal menghapus: {{message}}",
+      titleUpdated: "Judul sesi diperbarui",
+      updateTitleFailed: "Gagal menyimpan judul: {{message}}",
+      
+      // Area input
+      inputPlaceholder: "Masukkan pertanyaan Anda atau seret file ke sini",
+      inputPlaceholderAnalyzing: "Menganalisis dokumen, harap tunggu...",
+      inputPlaceholderSelectSession: "Pilih sesi untuk mulai mengobrol",
+      uploadFile: "Unggah file",
+      viewSessionDocuments: "Lihat dokumen sesi",
+      send: "Kirim",
+      analyzing: "Menganalisis...",
+      thinking: "Berpikir...",
+      
+      // Analisis dokumen
+      documentAnalysisComplete: "Analisis dokumen selesai",
+      documentAnalysisFailed: "Analisis dokumen gagal",
+      createSessionFailed2: "Gagal membuat sesi",
+      addDocumentFailed: "Gagal menambahkan dokumen ke sesi",
+      sessionDocumentLimitReached: "Sesi saat ini telah mencapai batas dokumen (10), silakan buat sesi baru untuk melanjutkan menambahkan dokumen",
+      documentLimitTitle: "Batas dokumen tercapai",
+      documentLimitContent: "Sesi saat ini sudah berisi 10 dokumen. Apakah Anda ingin membuat sesi baru?",
+      createNewSession: "Buat Sesi Baru",
+      
+      // Fitur terjemahan
+      selectTargetLanguage: "Pilih bahasa target",
+      translate: "Terjemahkan",
+      translating: "Menerjemahkan...",
+      translationComplete: "Terjemahan selesai",
+      translationFailed: "Terjemahan gagal",
+      noTranslationContent: "Tidak ada konten terjemahan yang tersedia untuk diunduh",
+      downloadFailed: "Unduhan gagal",
+      
+      // Penampil dokumen
+      originalText: "Asli",
+      translation: "Terjemahan",
+      syncScrolling: "Sinkronisasi Gulir",
+      independentScrolling: "Gulir Independen",
+      downloadTranslation: "Unduh Terjemahan",
+      uploadDocumentPrompt: "Silakan unggah dokumen atau tunggu analisis selesai",
+      selectLanguagePrompt: "Silakan pilih bahasa dan klik terjemahkan",
+      
+      // Opsi unduhan
+      wordDocument: "Dokumen Word",
+      pdfDocument: "Dokumen PDF",
+      markdown: "Markdown",
+      
+      // Daftar sesi
+      noSessionHistory: "Tidak ada riwayat obrolan",
+      messagesCount: "{{count}} pesan",
+      aiOnlySession: "Obrolan AI",
+      documentSession: "Obrolan Dokumen",
+      
+      // Dokumen sesi
+      sessionDocuments: "Dokumen Sesi",
+      noDocuments: "Tidak ada dokumen dalam sesi saat ini",
+      
+      // Status memuat
+      loadingMoreMessages: "Memuat lebih banyak pesan...",
+      
+      // Pesan kesalahan
+      questionRequired: "Silakan masukkan pertanyaan atau unggah file",
+      sendFailed: "Gagal mengajukan pertanyaan",
+      processingFailed: "Pemrosesan gagal",
+      loginExpired: "Login telah kedaluwarsa, silakan login kembali",
+      
+      // Pesan sukses
+      fileAnalysisComplete: "File {{filename}} telah berhasil dianalisis, Anda dapat mulai bertanya"
+    },
+    chatMessage: {
+      referenceSources: "Sumber Referensi",
+      sourcesCount: "{{count}} sumber",
+      unknownSource: "Sumber tidak diketahui",
+      copied: "Disalin",
+      copyMessage: "Salin pesan",
+      copySuccess: "Disalin ke clipboard",
+      copyFailed: "Gagal menyalin",
+      chartRenderFailed: "Gagal merender diagram"
     }
   }
 }

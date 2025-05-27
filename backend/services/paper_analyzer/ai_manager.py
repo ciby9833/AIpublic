@@ -36,6 +36,270 @@ class MessageInfo(TypedDict):
     role: str
     content: str
 
+class IntentAnalyzer:
+    """智能意图识别器"""
+    
+    def __init__(self):
+        # 意图分类的特征模式
+        self.intent_patterns = {
+            "GENERAL_QUERY": {
+                "keywords": [
+                    # 概念询问
+                    "什么是", "介绍", "解释", "定义", "概念", "原理", "基础知识",
+                    "what is", "explain", "define", "introduction", "concept",
+                    
+                    # 方法询问
+                    "如何", "怎么", "方法", "步骤", "技巧", "建议", "推荐", "教程",
+                    "how to", "how can", "method", "steps", "tutorial", "guide",
+                    
+                    # 比较分析
+                    "比较", "区别", "差异", "优缺点", "特点", "特征", "对比",
+                    "compare", "difference", "versus", "pros and cons", "features",
+                    
+                    # 通用知识
+                    "历史", "发展", "趋势", "现状", "未来", "应用", "影响",
+                    "history", "development", "trend", "application", "impact",
+                    
+                    # 计算和工具
+                    "计算", "翻译", "转换", "生成", "创建", "制作",
+                    "calculate", "translate", "convert", "generate", "create"
+                ],
+                "patterns": [
+                    r"^(什么是|what\s+is|explain|define)",
+                    r"(如何|怎么|how\s+to|how\s+can)",
+                    r"(比较|区别|difference|compare)",
+                    r"(为什么|why|原因|reason)",
+                    r"(计算|翻译|转换|calculate|translate|convert)"
+                ],
+                "negative_indicators": [
+                    "文档", "这篇", "上面", "前面", "刚才", "之前提到",
+                    "document", "paper", "above", "mentioned", "this file"
+                ]
+            },
+            
+            "DOCUMENT_QUERY": {
+                "keywords": [
+                    # 明确文档引用
+                    "文档", "文件", "这篇", "这个文档", "论文", "报告", "材料",
+                    "document", "paper", "file", "this document", "article",
+                    
+                    # 位置引用
+                    "上面", "前面", "刚才", "之前提到", "文中", "文章中", "书中",
+                    "above", "mentioned", "previous", "earlier", "in the text",
+                    
+                    # 文档操作
+                    "总结", "摘要", "结论", "要点", "关键信息", "主要内容",
+                    "summarize", "summary", "conclusion", "key points", "main content",
+                    
+                    # 文档分析
+                    "分析", "解读", "理解", "说明", "阐述", "详细说明",
+                    "analyze", "interpret", "explain", "elaborate", "detail"
+                ],
+                "patterns": [
+                    r"(这篇|这个|该|此)(文档|文件|论文|报告|材料)",
+                    r"(文档|文件|论文|报告)(中|里|说|提到|显示|表明)",
+                    r"(上面|前面|刚才|之前)(提到|说到|讲到|的)",
+                    r"(总结|摘要|概括)(一下|下|这篇|文档)",
+                    r"(根据|基于|参考)(文档|文件|材料|内容)"
+                ],
+                "strong_indicators": [
+                    "这个文档", "这篇文档", "文档中", "文档里", "文档说", "文档提到",
+                    "上述文档", "刚才的文档", "前面的文档", "文档内容",
+                    "总结文档", "分析文档", "文档摘要"
+                ]
+            },
+            
+            "CONTEXT_QUERY": {
+                "keywords": [
+                    # 对话延续
+                    "继续", "接着", "然后", "还有", "另外", "此外", "补充",
+                    "continue", "then", "also", "additionally", "furthermore",
+                    
+                    # 引用前文
+                    "刚才", "之前", "上面", "前面", "刚刚", "刚说",
+                    "just now", "earlier", "previously", "before", "above",
+                    
+                    # 追问
+                    "详细", "具体", "更多", "进一步", "深入", "展开",
+                    "detail", "specific", "more", "further", "elaborate"
+                ],
+                "patterns": [
+                    r"^(继续|接着|然后|还有)",
+                    r"(刚才|之前|上面|前面)(说|提到|讲)",
+                    r"(详细|具体|更多)(说明|解释|介绍)",
+                    r"(能否|可以)(详细|具体|进一步)"
+                ]
+            },
+            
+            "ANALYSIS_QUERY": {
+                "keywords": [
+                    # 深度分析
+                    "分析", "评估", "评价", "判断", "观点", "看法", "意见",
+                    "analyze", "evaluate", "assess", "opinion", "view", "perspective",
+                    
+                    # 数据处理
+                    "统计", "计算", "汇总", "整理", "筛选", "排序", "分类",
+                    "statistics", "calculate", "summarize", "filter", "sort", "classify",
+                    
+                    # 深入理解
+                    "深入", "透彻", "全面", "系统", "综合", "整体",
+                    "in-depth", "comprehensive", "systematic", "overall", "thorough"
+                ],
+                "patterns": [
+                    r"(分析|评估|评价)(一下|下|这个|该)",
+                    r"(统计|计算|汇总)(数据|信息|内容)",
+                    r"(深入|全面|系统)(分析|理解|解释)"
+                ]
+            }
+        }
+    
+    def analyze_intent(self, question: str, has_documents: bool = False, history: str = None) -> Dict[str, Any]:
+        """
+        多维度意图分析
+        
+        返回:
+            {
+                "intent": "GENERAL_QUERY|DOCUMENT_QUERY|CONTEXT_QUERY|ANALYSIS_QUERY",
+                "confidence": 0.0-1.0,
+                "reasoning": "判断理由",
+                "scores": {"GENERAL_QUERY": 0.3, "DOCUMENT_QUERY": 0.7, ...}
+            }
+        """
+        question_lower = question.lower().strip()
+        
+        # 初始化各意图得分
+        scores = {
+            "GENERAL_QUERY": 0.0,
+            "DOCUMENT_QUERY": 0.0,
+            "CONTEXT_QUERY": 0.0,
+            "ANALYSIS_QUERY": 0.0
+        }
+        
+        reasoning_parts = []
+        
+        # 1. 基础条件检查
+        if not has_documents:
+            scores["GENERAL_QUERY"] = 1.0
+            return {
+                "intent": "GENERAL_QUERY",
+                "confidence": 1.0,
+                "reasoning": "无文档上下文，使用通用查询模式",
+                "scores": scores
+            }
+        
+        # 2. 关键词匹配分析
+        for intent_type, patterns in self.intent_patterns.items():
+            keyword_score = 0
+            pattern_score = 0
+            
+            # 关键词匹配
+            keywords = patterns.get("keywords", [])
+            matched_keywords = [kw for kw in keywords if kw in question_lower]
+            if matched_keywords:
+                keyword_score = min(len(matched_keywords) * 0.2, 0.6)
+                reasoning_parts.append(f"{intent_type}: 匹配关键词 {matched_keywords[:3]}")
+            
+            # 正则模式匹配
+            regex_patterns = patterns.get("patterns", [])
+            for pattern in regex_patterns:
+                if re.search(pattern, question_lower):
+                    pattern_score += 0.3
+                    reasoning_parts.append(f"{intent_type}: 匹配模式 {pattern}")
+            
+            # 强指示词检查（仅对DOCUMENT_QUERY）
+            if intent_type == "DOCUMENT_QUERY":
+                strong_indicators = patterns.get("strong_indicators", [])
+                for indicator in strong_indicators:
+                    if indicator in question_lower:
+                        pattern_score += 0.5
+                        reasoning_parts.append(f"DOCUMENT_QUERY: 强指示词 '{indicator}'")
+            
+            # 负面指示词检查（仅对GENERAL_QUERY）
+            if intent_type == "GENERAL_QUERY":
+                negative_indicators = patterns.get("negative_indicators", [])
+                negative_penalty = 0
+                for neg_indicator in negative_indicators:
+                    if neg_indicator in question_lower:
+                        negative_penalty += 0.3
+                        reasoning_parts.append(f"GENERAL_QUERY: 负面指示词 '{neg_indicator}'")
+                
+                scores[intent_type] = max(0, keyword_score + pattern_score - negative_penalty)
+            else:
+                scores[intent_type] = keyword_score + pattern_score
+        
+        # 3. 上下文相关性分析
+        if history:
+            history_lower = history.lower()
+            
+            # 检查是否是对话延续
+            continuation_patterns = [
+                "继续", "接着", "然后", "还有", "另外", "详细", "具体", "更多"
+            ]
+            if any(pattern in question_lower for pattern in continuation_patterns):
+                scores["CONTEXT_QUERY"] += 0.4
+                reasoning_parts.append("CONTEXT_QUERY: 检测到对话延续模式")
+            
+            # 检查是否引用了历史内容
+            if any(ref in question_lower for ref in ["刚才", "之前", "上面", "前面"]):
+                scores["CONTEXT_QUERY"] += 0.3
+                reasoning_parts.append("CONTEXT_QUERY: 引用历史对话")
+        
+        # 4. 问题类型分析
+        question_types = {
+            "概念询问": [r"(什么是|what\s+is|define)", 0.3, "GENERAL_QUERY"],
+            "方法询问": [r"(如何|怎么|how\s+to)", 0.3, "GENERAL_QUERY"],
+            "文档总结": [r"(总结|摘要|概括)", 0.4, "DOCUMENT_QUERY"],
+            "数据分析": [r"(统计|计算|分析|筛选)", 0.4, "ANALYSIS_QUERY"],
+            "比较分析": [r"(比较|对比|区别)", 0.2, "GENERAL_QUERY"]
+        }
+        
+        for q_type, (pattern, score_boost, target_intent) in question_types.items():
+            if re.search(pattern, question_lower):
+                scores[target_intent] += score_boost
+                reasoning_parts.append(f"{target_intent}: {q_type}模式")
+        
+        # 5. 长度和复杂度分析
+        if len(question) > 100:
+            scores["ANALYSIS_QUERY"] += 0.2
+            reasoning_parts.append("ANALYSIS_QUERY: 问题较长，可能需要深度分析")
+        
+        # 6. 确定最终意图
+        max_score = max(scores.values())
+        if max_score == 0:
+            # 如果所有得分都是0，使用默认策略
+            final_intent = "GENERAL_QUERY"
+            confidence = 0.5
+            reasoning_parts.append("使用默认策略：通用查询")
+        else:
+            # 找到得分最高的意图
+            final_intent = max(scores.items(), key=lambda x: x[1])[0]
+            confidence = min(max_score, 1.0)
+        
+        # 7. 置信度调整
+        # 如果最高分和第二高分很接近，降低置信度
+        sorted_scores = sorted(scores.values(), reverse=True)
+        if len(sorted_scores) > 1 and sorted_scores[0] - sorted_scores[1] < 0.2:
+            confidence *= 0.8
+            reasoning_parts.append("多个意图得分接近，降低置信度")
+        
+        # 8. 特殊规则覆盖
+        # 如果明确提到文档且有文档，强制使用文档查询
+        explicit_doc_refs = [
+            "这个文档", "这篇文档", "文档中", "文档里", "文档说",
+            "根据文档", "文档显示", "文档提到"
+        ]
+        if any(ref in question_lower for ref in explicit_doc_refs):
+            final_intent = "DOCUMENT_QUERY"
+            confidence = 0.9
+            reasoning_parts.append("检测到明确文档引用，强制使用文档查询")
+        
+        return {
+            "intent": final_intent,
+            "confidence": confidence,
+            "reasoning": "; ".join(reasoning_parts),
+            "scores": scores
+        }
+
 class AIManager:
     def __init__(self):
         load_dotenv()
@@ -57,13 +321,16 @@ class AIManager:
             "max_output_tokens": 2048,
         }
         
-        # 添加安全设置
+        # 添加安全设置 - 放宽限制，避免误判正常对话
         self.safety_settings = {
-            "harassment": "block_medium_and_above",
-            "hate_speech": "block_medium_and_above", 
-            "sexually_explicit": "block_medium_and_above",
-            "dangerous": "block_medium_and_above"
+            "harassment": "block_only_high",
+            "hate_speech": "block_only_high", 
+            "sexually_explicit": "block_only_high",
+            "dangerous": "block_only_high"
         }
+        
+        # 初始化意图分析器
+        self.intent_analyzer = IntentAnalyzer()
 
     async def get_response(self, question: str, context: Union[str, Dict, List[Dict]], history: str = None) -> dict:
         """根据意图智能选择处理模式生成回答"""
@@ -113,22 +380,60 @@ class AIManager:
                 safety_settings=self.safety_settings
             )
             
-            # 检查响应
+            # 检查响应 - 如果主要方法失败，尝试降级处理
             if not response or not response.text:
+                print("Primary response failed, attempting fallback...")
+                try:
+                    # 降级：使用更简单的提示词重试
+                    fallback_prompt = f"请回答这个问题：{question}"
+                    fallback_response = self.model.generate_content(
+                        fallback_prompt,
+                        generation_config={
+                            "temperature": 0.8,
+                            "max_output_tokens": 1024,
+                        }
+                    )
+                    
+                    if fallback_response and fallback_response.text:
+                        reply_content = self._parse_response_content(fallback_response.text)
+                        return {
+                            "answer": str(fallback_response.text),
+                            "sources": [],
+                            "confidence": 0.6,
+                            "reply": reply_content,
+                            "fallback_used": True
+                        }
+                except Exception as fallback_error:
+                    print(f"Fallback also failed: {str(fallback_error)}")
+                
+                # 最终降级：返回基本回答
                 return {
-                    "answer": "抱歉，我无法生成有效的回答。请尝试重新提问或检查文档内容。",
+                    "answer": "我理解您的问题，但目前无法生成详细回答。这可能是由于内容安全检查或技术限制。请尝试重新表述您的问题，或稍后再试。",
                     "sources": [],
                     "confidence": 0.0,
                     "reply": [
                         {
                             "type": "markdown",
-                            "content": "抱歉，我无法生成有效的回答。请尝试重新提问或检查文档内容。"
+                            "content": "我理解您的问题，但目前无法生成详细回答。这可能是由于内容安全检查或技术限制。请尝试重新表述您的问题，或稍后再试。"
                         }
                     ]
                 }
             
             # 解析响应内容，识别不同类型的内容
             reply_content = self._parse_response_content(response.text)
+            
+            # 初始化sources - Gemini API目前不直接提供sources信息
+            # 如果需要sources，应该从context参数中提取或通过其他方式获得
+            sources = []
+            
+            # 如果context包含sources信息，提取它们
+            if isinstance(context, dict) and "chunks" in context:
+                sources = context.get("chunks", [])
+            elif isinstance(context, list):
+                # 如果是多文档上下文
+                for doc_context in context:
+                    if isinstance(doc_context, dict) and "chunks" in doc_context:
+                        sources.extend(doc_context.get("chunks", []))
             
             # 返回结构化数据，同时兼容旧格式和新格式
             response_data = {
@@ -373,16 +678,39 @@ class AIManager:
                     generation_config=self.generation_config
                 )
             
-            # 检查响应
+            # 检查响应 - 增加降级处理
             if not response or not response.text:
+                print("Chat response failed, attempting simple fallback...")
+                try:
+                    # 简单降级：直接回答问题
+                    simple_response = self.model.generate_content(
+                        f"请简单回答：{message}",
+                        generation_config={
+                            "temperature": 0.9,
+                            "max_output_tokens": 512,
+                        }
+                    )
+                    
+                    if simple_response and simple_response.text:
+                        reply_content = self._parse_response_content(simple_response.text)
+                        return {
+                            "answer": str(simple_response.text),
+                            "confidence": 0.6,
+                            "sources": [],
+                            "reply": reply_content,
+                            "fallback_used": True
+                        }
+                except Exception as fallback_error:
+                    print(f"Simple fallback failed: {str(fallback_error)}")
+                
                 return {
-                    "answer": "抱歉，我无法生成有效的回答。请尝试重新提问。",
+                    "answer": "我理解您的问题。由于当前的技术限制，我无法提供详细回答。请尝试重新表述您的问题，我会尽力帮助您。",
                     "confidence": 0.0,
                     "sources": [],
                     "reply": [
                         {
                             "type": "markdown",
-                            "content": "抱歉，我无法生成有效的回答。请尝试重新提问。"
+                            "content": "我理解您的问题。由于当前的技术限制，我无法提供详细回答。请尝试重新表述您的问题，我会尽力帮助您。"
                         }
                     ]
                 }
@@ -756,13 +1084,19 @@ Excel文件结构详情:
 
     async def stream_response(self, question, context, history=None):
         try:
+            # 验证问题不为空
+            if not question or not question.strip():
+                yield {"error": "问题内容不能为空", "done": True}
+                return
+            
             # 构建提示
             prompt = self._build_prompt(question, context, history)
             
-            # 使用新的API名称替换旧方法调用
-            response = await self.model.generate_content_async(
+            # 使用同步方法避免异步问题
+            response = self.model.generate_content(
                 prompt,
-                generation_config=self.generation_config
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings
             )
             
             # 处理返回结果
@@ -794,7 +1128,37 @@ Excel文件结构详情:
             print(f"Stream generation error: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            yield {"error": str(e), "done": True}
+            
+            # 尝试降级处理
+            try:
+                print("Attempting fallback for document stream...")
+                fallback_response = self.model.generate_content(
+                    f"请回答这个问题：{question}",
+                    generation_config={
+                        "temperature": 0.7,
+                        "max_output_tokens": 1024,
+                    }
+                )
+                
+                if fallback_response and fallback_response.text:
+                    # 模拟流式输出降级响应
+                    full_text = fallback_response.text
+                    for i in range(0, len(full_text), 6):
+                        chunk = full_text[i:i+6]
+                        yield {
+                            "partial_response": chunk,
+                            "done": i+6 >= len(full_text),
+                            "fallback_used": True
+                        }
+                        await asyncio.sleep(0.015)
+                    return
+            except Exception as fallback_error:
+                print(f"Document stream fallback failed: {str(fallback_error)}")
+            
+            yield {
+                "error": "由于技术限制，暂时无法处理您的请求。请稍后重试或重新表述您的问题。",
+                "done": True
+            }
 
     def _build_prompt(self, question, context, history=None, is_general_chat=False):
         """构建提示词，用于统一不同方法的提示词格式"""
@@ -847,52 +1211,78 @@ Excel文件结构详情:
         return prompt
 
     async def identify_intent(self, question: str, context=None, has_documents=False, history=None):
-        """识别用户意图，确定最佳响应模式"""
+        """智能识别用户意图，确定最佳响应模式"""
         
-        # 构建意图识别的提示词
-        intent_prompt = f"""分析以下用户问题，并确定最合适的回答模式。
-问题: {question}
-
-{'有文档上下文' if has_documents else '无文档上下文'}
-{'有对话历史记录' if history else '无对话历史记录'}
-
-请判断这个问题属于哪种类型:
-1. GENERAL_QUERY: 通用问询，与文档无关
-2. DOCUMENT_QUERY: 关于文档内容的具体问询
-3. ANALYSIS_QUERY: 需要对文档进行分析处理的请求
-4. CONTEXT_QUERY: 关于当前对话上下文的问询
-
-仅回复类型名称，不要解释。"""
-
-        # 调用模型简洁分析意图
-        try:
-            intent_response = self.model.generate_content(
-                intent_prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 20
-                }
-            )
-            
-            intent = intent_response.text.strip()
-            
-            # 规范化意图结果
-            if "GENERAL" in intent:
-                return "GENERAL_QUERY"
-            elif "DOCUMENT" in intent:
-                return "DOCUMENT_QUERY"
-            elif "ANALYSIS" in intent:
-                return "ANALYSIS_QUERY"
-            elif "CONTEXT" in intent:
-                return "CONTEXT_QUERY"
+        # 先进行简单的关键词检测
+        question_lower = question.lower()
+        
+        # 明确的通用查询关键词
+        general_keywords = [
+            '什么是', '介绍', '解释', '定义', '概念', '原理', '历史', '发展',
+            '如何', '怎么', '方法', '步骤', '技巧', '建议', '推荐',
+            '比较', '区别', '优缺点', '特点', '特征',
+            '天气', '新闻', '时间', '日期', '计算', '翻译',
+            'what is', 'how to', 'explain', 'define', 'compare'
+        ]
+        
+        # 明确的文档查询关键词
+        document_keywords = [
+            '文档', '文件', '内容', '这篇', '这个文档', '论文', '报告',
+            '上面', '前面', '刚才', '之前提到', '文中', '文章',
+            '总结', '摘要', '结论', '要点', '关键信息',
+            'document', 'paper', 'content', 'above', 'mentioned'
+        ]
+        
+        # 检查是否包含明确的通用查询关键词
+        has_general_keywords = any(keyword in question_lower for keyword in general_keywords)
+        has_document_keywords = any(keyword in question_lower for keyword in document_keywords)
+        
+        print(f"意图识别调试: 问题='{question}', 通用关键词={has_general_keywords}, 文档关键词={has_document_keywords}, 有文档={has_documents}")
+        
+        # 如果没有文档，直接返回通用查询
+        if not has_documents:
+            print("无文档，返回通用查询")
+            return "GENERAL_QUERY"
+        
+        # 优先级1: 如果有明确的通用关键词，优先返回通用查询（除非同时有强文档关键词）
+        if has_general_keywords:
+            if has_document_keywords:
+                # 同时有两种关键词，需要进一步判断
+                print("同时有通用和文档关键词，需要AI判断")
             else:
-                # 默认为文档查询(如果有文档)，否则通用查询
-                return "DOCUMENT_QUERY" if has_documents else "GENERAL_QUERY"
-            
-        except Exception as e:
-            print(f"Intent identification error: {str(e)}")
-            # 默认为文档查询(如果有文档)，否则通用查询
-            return "DOCUMENT_QUERY" if has_documents else "GENERAL_QUERY"
+                # 只有通用关键词，直接返回通用查询
+                print("只有通用关键词，返回通用查询")
+                return "GENERAL_QUERY"
+        
+        # 优先级2: 如果有明确的文档关键词且没有通用关键词，返回文档查询
+        if has_document_keywords and not has_general_keywords:
+            print("只有文档关键词，返回文档查询")
+            return "DOCUMENT_QUERY"
+        
+        # 对于没有明确关键词的情况，先做最后一次简单检查
+        # 如果问题看起来像是在询问某个概念或技术，倾向于通用查询
+        if any(pattern in question_lower for pattern in ['是什么', '是啥', 'what is', 'what are']):
+            print("检测到概念询问模式，返回通用查询")
+            return "GENERAL_QUERY"
+        
+        # 对于模糊情况，优先使用通用查询，避免过度依赖AI判断
+        print("问题意图不明确，采用保守策略：优先使用通用查询模式")
+        
+        # 简化的意图识别：只在非常明确的情况下才使用文档模式
+        # 检查是否明确提到文档相关内容
+        explicit_doc_patterns = [
+            '这个文档', '这篇文档', '文档中', '文档里', '文档说', '文档提到',
+            '上述文档', '刚才的文档', '前面的文档', '文档内容',
+            '总结文档', '分析文档', '文档摘要'
+        ]
+        
+        if any(pattern in question_lower for pattern in explicit_doc_patterns):
+            print("检测到明确的文档引用，使用文档查询模式")
+            return "DOCUMENT_QUERY"
+        
+        # 默认策略：对于所有模糊情况，都使用通用查询，确保用户能得到回答
+        print("使用通用查询模式，确保用户能得到回答")
+        return "GENERAL_QUERY"
 
     async def chat_without_context_stream(self, message: str, history: Optional[List[Dict[str, str]]] = None):
         """
@@ -903,22 +1293,27 @@ Excel文件结构详情:
             history: 格式化后的对话历史 [{"role": "user|assistant", "content": "消息内容"}, ...]
         """
         try:
+            # 验证消息不为空
+            if not message or not message.strip():
+                yield {"error": "消息内容不能为空", "done": True}
+                return
+            
             # 构建对话历史格式
             chat_history = []
             if history and isinstance(history, list):
                 for msg in history:
-                    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    if isinstance(msg, dict) and "role" in msg and "content" in msg and msg["content"].strip():
                         # 转换为Gemini API所需的格式
                         role = "user" if msg["role"] == "user" else "model"
                         chat_history.append({
                             "role": role,
-                            "parts": [{"text": msg["content"]}]
+                            "parts": [{"text": msg["content"].strip()}]
                         })
             
             # 构建更适合通用对话的系统提示词
             if not chat_history:
                 # 如果没有历史记录，使用独立提示词
-                system_prompt = """你是一个强大的AI助手，能够回答各种问题，包括一般知识问题、深度解析问题和专业领域问题。
+                system_prompt = f"""你是一个强大的AI助手，能够回答各种问题，包括一般知识问题、深度解析问题和专业领域问题。
                 
 你应该:
 1. 直接回答用户问题，提供准确、有用的信息
@@ -927,28 +1322,22 @@ Excel文件结构详情:
 4. 当涉及专业知识时，提供深入的解析
 5. 当不确定答案时，诚实表明
 
-用户问题: {message}
+用户问题: {message.strip()}
 
 请直接回答上述问题，不需要提及文档。"""
                 
-                # 使用流式生成
-                response = await self.model.generate_content_async(
+                # 使用同步方法避免异步问题
+                response = self.model.generate_content(
                     system_prompt,
                     generation_config=self.generation_config,
                     safety_settings=self.safety_settings
                 )
             else:
                 # 如果有历史记录，使用聊天模式
-                # 添加当前用户消息
-                chat_history.append({
-                    "role": "user",
-                    "parts": [{"text": message}]
-                })
-                
                 # 使用历史对话开始聊天
-                chat = self.model.start_chat(history=chat_history[:-1])
-                response = await chat.send_message_async(
-                    message,
+                chat = self.model.start_chat(history=chat_history)
+                response = chat.send_message(
+                    message.strip(),
                     generation_config=self.generation_config,
                     safety_settings=self.safety_settings
                 )
@@ -979,4 +1368,35 @@ Excel文件结构详情:
             print(f"通用聊天流式生成错误: {str(e)}")
             import traceback
             print(traceback.format_exc())
-            yield {"error": str(e), "done": True}
+            
+            # 尝试降级处理
+            try:
+                print("Attempting fallback for streaming chat...")
+                fallback_response = self.model.generate_content(
+                    f"请回答：{message}",
+                    generation_config={
+                        "temperature": 0.8,
+                        "max_output_tokens": 512,
+                    }
+                )
+                
+                if fallback_response and fallback_response.text:
+                    # 模拟流式输出降级响应
+                    full_text = fallback_response.text
+                    for i in range(0, len(full_text), 8):
+                        chunk = full_text[i:i+8]
+                        yield {
+                            "partial_response": chunk,
+                            "done": i+8 >= len(full_text),
+                            "fallback_used": True
+                        }
+                        await asyncio.sleep(0.02)
+                    return
+            except Exception as fallback_error:
+                print(f"Fallback streaming also failed: {str(fallback_error)}")
+            
+            # 最终错误处理
+            yield {
+                "error": "由于技术限制，暂时无法处理您的请求。请稍后重试或重新表述您的问题。",
+                "done": True
+            }
