@@ -33,78 +33,73 @@ export const AuthCallback = () => {
           hasAuthData: !!authData,
           authDataLength: authData?.length,
           authDataPreview: authData?.substring(0, 50) + '...',
-          urlParams: Object.fromEntries(urlParams.entries()),
           fullUrl: window.location.href,
-          search: window.location.search,
-          hash: window.location.hash,
-          pathname: window.location.pathname
+          search: window.location.search
         });
 
         if (!authData) {
           throw new Error('No auth data received in URL parameter');
         }
 
-        // URL解码认证数据（防止URL编码导致的问题）
-        let decodedUrlData;
-        try {
-          decodedUrlData = decodeURIComponent(authData);
-          console.log('URL decoded data length:', decodedUrlData.length);
-          console.log('URL decoding changed data:', authData !== decodedUrlData);
-        } catch (urlDecodeError) {
-          console.warn('URL decode failed, using original data:', urlDecodeError);
-          decodedUrlData = authData;
-        }
-
-        // 解码 base64 编码的认证数据
+        // 多层解码处理
         let decodedAuthData;
         try {
-          // 清理Base64字符串：移除空格和其他非Base64字符
-          const cleanedAuthData = decodedUrlData.replace(/[^A-Za-z0-9+/=]/g, '');
-          console.log('Original auth data length:', decodedUrlData.length);
-          console.log('Cleaned auth data length:', cleanedAuthData.length);
-          console.log('Removed characters:', decodedUrlData.length - cleanedAuthData.length);
+          // 1. URL解码
+          let urlDecodedData = decodeURIComponent(authData);
+          console.log('URL decoded data length:', urlDecodedData.length);
           
-          // 检查Base64字符串的有效性
+          // 2. 清理Base64字符串
+          const cleanedAuthData = urlDecodedData.replace(/[^A-Za-z0-9+/=]/g, '');
+          console.log('Cleaned auth data length:', cleanedAuthData.length);
+          
+          // 3. 添加Base64填充（如果需要）
+          let paddedData = cleanedAuthData;
           if (cleanedAuthData.length % 4 !== 0) {
-            console.warn('Base64 string length is not a multiple of 4, padding...');
-            // 添加必要的填充
             const padding = '='.repeat((4 - (cleanedAuthData.length % 4)) % 4);
-            const paddedData = cleanedAuthData + padding;
-            console.log('Padded data length:', paddedData.length);
-            decodedAuthData = atob(paddedData);
-          } else {
-            decodedAuthData = atob(cleanedAuthData);
+            paddedData = cleanedAuthData + padding;
+            console.log('Added padding, new length:', paddedData.length);
           }
           
+          // 4. Base64解码
+          decodedAuthData = atob(paddedData);
           console.log('Base64 decoded successfully, length:', decodedAuthData.length);
-        } catch (decodeError) {
-          console.error('Base64 decode error:', decodeError);
-          console.error('Original auth data:', authData);
-          console.error('URL decoded data:', decodedUrlData);
-          console.error('Auth data length:', decodedUrlData.length);
-          console.error('Auth data contains invalid chars:', /[^A-Za-z0-9+/=]/.test(decodedUrlData));
           
-          // 尝试直接解码原始数据作为备用方案
+        } catch (decodeError) {
+          console.error('Decode error:', decodeError);
+          console.error('Original auth data:', authData);
+          
+          // 备用解码方案
           try {
-            console.log('Attempting to decode original data as fallback...');
-            const cleanedOriginal = authData.replace(/[^A-Za-z0-9+/=]/g, '');
-            decodedAuthData = atob(cleanedOriginal);
+            console.log('Trying fallback decode...');
+            // 直接尝试Base64解码原始数据
+            const directCleaned = authData.replace(/[^A-Za-z0-9+/=]/g, '');
+            decodedAuthData = atob(directCleaned);
             console.log('Fallback decode successful');
           } catch (fallbackError) {
-            console.error('Fallback decode also failed:', fallbackError);
-            throw new Error('Failed to decode auth data from URL parameter');
+            console.error('All decode attempts failed:', fallbackError);
+            throw new Error('Failed to decode authentication data');
           }
         }
         
-        const data = JSON.parse(decodedAuthData);
+        // 解析JSON数据
+        let data;
+        try {
+          data = JSON.parse(decodedAuthData);
+          console.log('JSON parsed successfully');
+        } catch (jsonError) {
+          console.error('JSON parse error:', jsonError);
+          console.error('Decoded data:', decodedAuthData);
+          throw new Error('Failed to parse authentication data');
+        }
         
-        // 添加数据验证日志
+        // 验证数据结构
         console.log('Parsed auth data:', {
           hasStatus: !!data.status,
           hasUserInfo: !!data.user_info,
           hasAccessToken: !!data.access_token,
           hasExpiresAt: !!data.expires_at,
-          status: data.status
+          status: data.status,
+          userName: data.user_info?.name
         });
         
         if (data.status === 'success' && data.user_info && data.access_token) {
@@ -113,18 +108,32 @@ export const AuthCallback = () => {
           localStorage.setItem('access_token', data.access_token);
           localStorage.setItem('expires_at', data.expires_at.toString());
           
-          console.log('Auth data saved, redirecting to home');
+          console.log('Auth data saved successfully, redirecting to home');
+          console.log('Saved user:', data.user_info.name);
+          
           hasProcessed.current = true;
           navigate('/', { replace: true });
         } else {
           console.error('Invalid auth data structure:', data);
-          throw new Error('Invalid auth data');
+          throw new Error('Invalid authentication data structure');
         }
+        
       } catch (error) {
         console.error('Auth callback error:', error);
-        // 添加更详细的错误信息
-        if (error instanceof SyntaxError) {
-          console.error('JSON parsing error:', error.message);
+        console.error('Error details:', {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : 'No stack trace',
+          url: window.location.href,
+          userAgent: navigator.userAgent
+        });
+        
+        // 显示用户友好的错误消息
+        if (error instanceof Error && error.message.includes('decode')) {
+          message.error('登录数据解析失败，请重新登录');
+        } else if (error instanceof Error && error.message.includes('parse')) {
+          message.error('登录数据格式错误，请重新登录');
+        } else {
+          message.error('登录处理失败，请重新登录');
         }
         
         hasProcessed.current = true;
@@ -134,8 +143,6 @@ export const AuthCallback = () => {
 
     handleAuthCallback();
   }, [navigate]);
-
-
 
   // 错误消息映射
   const getErrorMessage = (error: string) => {
@@ -148,7 +155,9 @@ export const AuthCallback = () => {
       'invalid_state': '无效的状态参数',
       'invalid_user_data': '用户数据无效',
       'missing_user_data': '缺少必要的用户数据',
-      'incomplete_data': '认证数据不完整'
+      'incomplete_data': '认证数据不完整',
+      'url_too_long': '认证数据过长，请联系管理员',
+      'encoding_error': '数据编码错误，请重新登录'
     };
     return errorMessages[error] || '登录过程中发生错误';
   };

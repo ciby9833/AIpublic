@@ -204,17 +204,32 @@ async def feishu_callback(code: str, state: str, db: Session = Depends(get_db)):
                 )
 
             # 7. 使用URL参数传递认证数据并重定向到前端
-            auth_data_json = json.dumps(auth_data, ensure_ascii=False)
+            auth_data_json = json.dumps(auth_data, ensure_ascii=True)  # 强制ASCII编码
             # 使用 base64 编码避免特殊字符问题
             auth_data_encoded = base64.b64encode(auth_data_json.encode('utf-8')).decode('ascii')
+
+            # 添加URL编码确保特殊字符正确传输
+            auth_data_url_encoded = urllib.parse.quote(auth_data_encoded, safe='')
+
             # 使用URL参数传递，避免Cookie跨域问题
-            redirect_url = f"{FRONTEND_URL}/auth/callback?data={auth_data_encoded}"
-            
+            redirect_url = f"{FRONTEND_URL}/auth/callback?data={auth_data_url_encoded}"
+
+            # 添加详细的调试日志
             logger.info("Authentication successful, redirecting to frontend")
-            logger.info(f"Encoded auth data length: {len(auth_data_encoded)}")
-            logger.info(f"Encoded auth data preview: {auth_data_encoded[:100]}...")
-            logger.info(f"Redirect URL: {redirect_url}")
-            
+            logger.info(f"Original JSON length: {len(auth_data_json)}")
+            logger.info(f"Base64 encoded length: {len(auth_data_encoded)}")
+            logger.info(f"URL encoded length: {len(auth_data_url_encoded)}")
+            logger.info(f"Final redirect URL length: {len(redirect_url)}")
+            logger.info(f"Auth data preview: {auth_data_encoded[:100]}...")
+            logger.info(f"User name contains non-ASCII: {any(ord(c) > 127 for c in user.name)}")
+
+            # 检查URL长度
+            if len(redirect_url) > 2048:
+                logger.error(f"Redirect URL too long: {len(redirect_url)} characters")
+                return RedirectResponse(
+                    url=f"{FRONTEND_URL}/login?error=url_too_long"
+                )
+
             return RedirectResponse(url=redirect_url)
 
     except Exception as e:
