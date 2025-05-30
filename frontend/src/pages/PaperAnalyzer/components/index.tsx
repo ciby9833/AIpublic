@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { List, message as antMessage, Tooltip } from 'antd';
-import { ChatMessage as ChatMessageType, RichContentItem } from '../../../types/chat';
+import { ApiChatMessage as ChatMessageType, RichContentItem } from '../../../types/chat';
 import { DownOutlined, UpOutlined, CopyOutlined, CheckOutlined, LeftOutlined, RightOutlined, UserOutlined, RobotOutlined } from '@ant-design/icons';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -15,6 +15,7 @@ import 'katex/dist/katex.min.css';
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  isStreaming?: boolean; // 新增：是否为流式消息
 }
 
 // Helper function to detect code blocks when markdown is not used
@@ -249,7 +250,143 @@ const preprocessMermaidContent = (content: string, t?: any): string => {
   return cleanContent;
 };
 
-const ChatMessage: React.FC<{ message: any }> = ({ message }) => {
+// 智能内容解析器，参考ChatGPT实现
+const SmartContentParser = ({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) => {
+  const [parsedContent, setParsedContent] = useState<Array<{
+    type: 'text' | 'code' | 'markdown' | 'table';
+    content: string;
+    language?: string;
+  }>>([]);
+
+  useEffect(() => {
+    const parseContent = (text: string) => {
+      const blocks: Array<{
+        type: 'text' | 'code' | 'markdown' | 'table';
+        content: string;
+        language?: string;
+      }> = [];
+
+      // 分割代码块
+      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+      let lastIndex = 0;
+      let match;
+
+      while ((match = codeBlockRegex.exec(text)) !== null) {
+        // 添加代码块前的文本
+        if (match.index > lastIndex) {
+          const beforeText = text.slice(lastIndex, match.index);
+          if (beforeText.trim()) {
+            blocks.push({
+              type: isMarkdownContent(beforeText) ? 'markdown' : 'text',
+              content: beforeText
+            });
+          }
+        }
+
+        // 添加代码块
+        blocks.push({
+          type: 'code',
+          content: match[2],
+          language: match[1] || 'text'
+        });
+
+        lastIndex = match.index + match[0].length;
+      }
+
+      // 添加剩余文本
+      if (lastIndex < text.length) {
+        const remainingText = text.slice(lastIndex);
+        if (remainingText.trim()) {
+          blocks.push({
+            type: isMarkdownContent(remainingText) ? 'markdown' : 'text',
+            content: remainingText
+          });
+        }
+      }
+
+      // 如果没有代码块，检查整个内容
+      if (blocks.length === 0) {
+        blocks.push({
+          type: isMarkdownContent(text) ? 'markdown' : 'text',
+          content: text
+        });
+      }
+
+      return blocks;
+    };
+
+    const isMarkdownContent = (text: string): boolean => {
+      // 检测Markdown特征
+      return /^[#*\-+>]|\[.*\]\(.*\)|^\d+\.|^\s*[-*+]\s|\|.*\|/.test(text.trim()) ||
+             text.includes('**') || text.includes('*') || text.includes('`');
+    };
+
+    setParsedContent(parseContent(content));
+  }, [content, isStreaming]);
+
+  return (
+    <div className="smart-content">
+      {parsedContent.map((block, index) => {
+        switch (block.type) {
+          case 'code':
+            return (
+              <SyntaxHighlighter
+                key={index}
+                language={block.language}
+                style={vscDarkPlus}
+                customStyle={{
+                  margin: '8px 0',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              >
+                {block.content}
+              </SyntaxHighlighter>
+            );
+          case 'markdown':
+            return (
+              <ReactMarkdown
+                key={index}
+                components={{
+                  code: ({ className, children, ...props }: any) => {
+                    const match = /language-(\w+)/.exec(className || '');
+                    const isInline = !match;
+                    return !isInline ? (
+                      <SyntaxHighlighter
+                        style={vscDarkPlus as any}
+                        language={match[1]}
+                        PreTag="div"
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    ) : (
+                      <code className={className} {...props}>
+                        {children}
+                      </code>
+                    );
+                  }
+                }}
+              >
+                {block.content}
+              </ReactMarkdown>
+            );
+          default:
+            return (
+              <div key={index} className="text-content">
+                {block.content}
+              </div>
+            );
+        }
+      })}
+      {isStreaming && (
+        <span className="streaming-cursor"></span>
+      )}
+    </div>
+  );
+};
+
+const ChatMessage: React.FC<ChatMessageProps> = ({ message, isStreaming = false }) => {
   const { t } = useTranslation();
   const { role, content, reply, sources } = message;
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
@@ -281,6 +418,370 @@ const ChatMessage: React.FC<{ message: any }> = ({ message }) => {
       antMessage.error(t('chatMessage.copyFailed'));
     }
   };
+
+  // ✅ 新增：专门处理reply字段中的富文本内容
+  const renderReplyContent = (replyItems: RichContentItem[]) => {
+    return replyItems.map((item, index) => {
+      const { type, content: itemContent, language, columns, rows } = item;
+      
+      switch (type) {
+        case 'code':
+          // 直接渲染代码块，不再经过SmartContentParser
+          return (
+            <SyntaxHighlighter
+              key={index}
+              language={language || 'text'}
+              style={vscDarkPlus}
+              customStyle={{
+                margin: '8px 0',
+                borderRadius: '6px',
+                fontSize: '14px'
+              }}
+            >
+              {itemContent || ''}
+            </SyntaxHighlighter>
+          );
+
+        case 'table':
+          // ✅ 新增：表格渲染支持
+          if (columns && rows && Array.isArray(columns) && Array.isArray(rows)) {
+            // 使用结构化的表格数据
+            return (
+              <div key={index} className="table-container" style={{ margin: '12px 0', overflowX: 'auto' }}>
+                <table className="message-table" style={{ 
+                  borderCollapse: 'collapse', 
+                  width: '100%',
+                  fontSize: '14px',
+                  border: '1px solid #ddd'
+                }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f5f5f5' }}>
+                      {columns.map((col: string, colIndex: number) => (
+                        <th key={colIndex} style={{ 
+                          border: '1px solid #ddd', 
+                          padding: '8px 12px',
+                          textAlign: 'left',
+                          fontWeight: '600'
+                        }}>
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row: string[], rowIndex: number) => (
+                      <tr key={rowIndex} style={{ 
+                        backgroundColor: rowIndex % 2 === 0 ? '#fff' : '#fafafa' 
+                      }}>
+                        {row.map((cell: string, cellIndex: number) => (
+                          <td key={cellIndex} style={{ 
+                            border: '1px solid #ddd', 
+                            padding: '8px 12px',
+                            textAlign: 'left'
+                          }}>
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          } else if (itemContent) {
+            // 如果没有结构化数据，尝试从content解析Markdown表格
+            return (
+              <ReactMarkdown
+                key={index}
+                components={{
+                  table: ({ children, ...props }) => (
+                    <div className="table-container" style={{ margin: '12px 0', overflowX: 'auto' }}>
+                      <table className="message-table" style={{ 
+                        borderCollapse: 'collapse', 
+                        width: '100%',
+                        fontSize: '14px',
+                        border: '1px solid #ddd'
+                      }} {...props}>
+                        {children}
+                      </table>
+                    </div>
+                  ),
+                  th: ({ children, ...props }) => (
+                    <th style={{ 
+                      border: '1px solid #ddd', 
+                      padding: '8px 12px',
+                      backgroundColor: '#f5f5f5',
+                      textAlign: 'left',
+                      fontWeight: '600'
+                    }} {...props}>
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children, ...props }) => (
+                    <td style={{ 
+                      border: '1px solid #ddd', 
+                      padding: '8px 12px',
+                      textAlign: 'left'
+                    }} {...props}>
+                      {children}
+                    </td>
+                  )
+                }}
+              >
+                {itemContent}
+              </ReactMarkdown>
+            );
+          }
+          return null;
+
+        case 'list':
+        case 'ordered-list':
+        case 'unordered-list':
+          // ✅ 新增：列表渲染支持
+          return (
+            <ReactMarkdown key={index}>
+              {itemContent || ''}
+            </ReactMarkdown>
+          );
+
+        case 'image':
+          // ✅ 新增：图片渲染支持
+          if (itemContent) {
+            try {
+              // 尝试解析图片URL或base64数据
+              const imageUrl = itemContent.startsWith('data:') ? itemContent : 
+                             itemContent.startsWith('http') ? itemContent : 
+                             `data:image/png;base64,${itemContent}`;
+              
+              return (
+                <div key={index} style={{ margin: '12px 0', textAlign: 'center' }}>
+                  <img 
+                    src={imageUrl} 
+                    alt="Generated content" 
+                    style={{ 
+                      maxWidth: '100%', 
+                      height: 'auto',
+                      borderRadius: '8px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                    }}
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                    }}
+                  />
+                </div>
+              );
+            } catch (error) {
+              return (
+                <div key={index} style={{ margin: '8px 0', color: '#999', fontStyle: 'italic' }}>
+                  [图片加载失败]
+                </div>
+              );
+            }
+          }
+          return null;
+
+        case 'mermaid':
+        case 'diagram':
+          // ✅ 新增：Mermaid图表渲染支持
+          return (
+            <div key={index} className="mermaid-container" style={{ 
+              margin: '16px 0', 
+              padding: '12px', 
+              backgroundColor: '#f9f9f9', 
+              borderRadius: '8px',
+              overflow: 'hidden'
+            }}>
+              <div className="mermaid">
+                {itemContent}
+              </div>
+            </div>
+          );
+
+        case 'latex':
+        case 'math':
+          // ✅ 新增：数学公式渲染支持
+          try {
+            return (
+              <div key={index} style={{ margin: '12px 0', textAlign: 'center' }}>
+                <div 
+                  dangerouslySetInnerHTML={{ 
+                    __html: katex.renderToString(itemContent || '', { 
+                      throwOnError: false,
+                      displayMode: true 
+                    }) 
+                  }} 
+                />
+              </div>
+            );
+          } catch (error) {
+            return (
+              <div key={index} style={{ 
+                margin: '8px 0', 
+                padding: '8px', 
+                backgroundColor: '#fff2f0',
+                border: '1px solid #ffccc7',
+                borderRadius: '4px',
+                color: '#f5222d',
+                fontSize: '13px'
+              }}>
+                数学公式渲染失败: {itemContent}
+              </div>
+            );
+          }
+
+        case 'html':
+          // ✅ 新增：HTML内容渲染支持（谨慎处理安全性）
+          return (
+            <div 
+              key={index} 
+              style={{ margin: '8px 0' }}
+              dangerouslySetInnerHTML={{ __html: itemContent || '' }}
+            />
+          );
+
+        case 'json':
+          // ✅ 新增：JSON数据渲染支持
+          try {
+            const formattedJson = JSON.stringify(JSON.parse(itemContent || '{}'), null, 2);
+            return (
+              <SyntaxHighlighter
+                key={index}
+                language="json"
+                style={vscDarkPlus}
+                customStyle={{
+                  margin: '8px 0',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              >
+                {formattedJson}
+              </SyntaxHighlighter>
+            );
+          } catch (error) {
+            return (
+              <pre key={index} style={{ 
+                margin: '8px 0', 
+                padding: '12px',
+                backgroundColor: '#f5f5f5',
+                borderRadius: '6px',
+                overflow: 'auto',
+                fontSize: '13px',
+                fontFamily: 'monospace'
+              }}>
+                {itemContent}
+              </pre>
+            );
+          }
+
+        case 'markdown':
+          // 对于markdown，使用ReactMarkdown渲染
+          return (
+            <ReactMarkdown
+              key={index}
+              components={{
+                code: ({ className, children, ...props }: any) => {
+                  const match = /language-(\w+)/.exec(className || '');
+                  const isInline = !match;
+                  return !isInline ? (
+                    <SyntaxHighlighter
+                      style={vscDarkPlus as any}
+                      language={match[1]}
+                      PreTag="div"
+                      {...props}
+                    >
+                      {String(children).replace(/\n$/, '')}
+                    </SyntaxHighlighter>
+                  ) : (
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  );
+                },
+                table: ({ children, ...props }) => (
+                  <div className="table-container" style={{ margin: '12px 0', overflowX: 'auto' }}>
+                    <table className="message-table" style={{ 
+                      borderCollapse: 'collapse', 
+                      width: '100%',
+                      fontSize: '14px',
+                      border: '1px solid #ddd'
+                    }} {...props}>
+                      {children}
+                    </table>
+                  </div>
+                ),
+                th: ({ children, ...props }) => (
+                  <th style={{ 
+                    border: '1px solid #ddd', 
+                    padding: '8px 12px',
+                    backgroundColor: '#f5f5f5',
+                    textAlign: 'left',
+                    fontWeight: '600'
+                  }} {...props}>
+                    {children}
+                  </th>
+                ),
+                td: ({ children, ...props }) => (
+                  <td style={{ 
+                    border: '1px solid #ddd', 
+                    padding: '8px 12px',
+                    textAlign: 'left'
+                  }} {...props}>
+                    {children}
+                  </td>
+                )
+              }}
+            >
+              {itemContent || ''}
+            </ReactMarkdown>
+          );
+
+        case 'text':
+        default:
+          // 纯文本内容，检查是否包含markdown格式
+          const isMarkdownContent = /^[#*\-+>]|\[.*\]\(.*\)|^\d+\.|^\s*[-*+]\s|\|.*\|/.test((itemContent || '').trim()) ||
+                                   (itemContent || '').includes('**') || 
+                                   (itemContent || '').includes('*') || 
+                                   (itemContent || '').includes('`');
+          
+          if (isMarkdownContent) {
+            return (
+              <ReactMarkdown
+                key={index}
+                components={{
+                  code: ({ className, children, ...props }: any) => {
+                    const match = /language-(\w+)/.exec(className || '');
+                    const isInline = !match;
+                    return !isInline ? (
+                      <SyntaxHighlighter
+                        style={vscDarkPlus as any}
+                        language={match[1]}
+                        PreTag="div"
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    ) : (
+                      <code className={className} {...props}>
+                        {children}
+                      </code>
+                    );
+                  }
+                }}
+              >
+                {itemContent || ''}
+              </ReactMarkdown>
+            );
+          } else {
+            return (
+              <div key={index} className="text-content">
+                {itemContent || ''}
+              </div>
+            );
+          }
+      }
+    });
+  };
   
   return (
     <div className={`chat-message ${role === 'user' ? 'user' : ''}`}>
@@ -289,27 +790,21 @@ const ChatMessage: React.FC<{ message: any }> = ({ message }) => {
       </div>
       <div className="message-content-wrapper">
         <div className="message-content">
-          {/* Prioritize using the reply array content */}
+          {/* ✅ 修复：区分处理reply字段和content字段 */}
           {Array.isArray(reply) && reply.length > 0 ? (
-            reply.map((item, index) => {
-              if (item.type === 'markdown') {
-                return <ReactMarkdown key={index}>{item.content}</ReactMarkdown>;
-              } else if (item.type === 'code') {
-                return (
-                  <pre key={index} className={`language-${item.language || 'text'}`}>
-                    <code>{item.content}</code>
-                  </pre>
-                );
-              } else if (item.type === 'table') {
-                return <ReactMarkdown key={index}>{item.content}</ReactMarkdown>;
-              } else {
-                // Default text rendering
-                return <div key={index}>{item.content}</div>;
-              }
-            })
+            // 有reply字段时，使用专门的渲染函数处理富文本
+            <div className="reply-content">
+              {renderReplyContent(reply)}
+              {isStreaming && (
+                <span className="streaming-cursor"></span>
+              )}
+            </div>
           ) : (
-            // Fallback to content field if reply array is empty
-            <div>{content}</div>
+            // 没有reply字段时，使用SmartContentParser处理content
+            <SmartContentParser 
+              content={content || ''} 
+              isStreaming={isStreaming}
+            />
           )}
           
           {/* Display sources if available - with expand/collapse functionality */}

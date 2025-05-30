@@ -151,53 +151,14 @@ export const paperAnalyzerApi = {
     }
   },
 
-  // 提问
+  // 提问 - 已废弃，请使用会话模式
   askQuestion: async (question: string, paperId: string): Promise<QuestionResponse> => {
-    try {
-      const response = await apiRequest(
-        `${API_BASE_URL}/api/paper/ask`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ question, paper_id: paperId })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Failed to ask question:', error);
-      throw error;
-    }
+    throw new Error('单次问答模式已废弃，请使用会话模式');
   },
 
-  // 获取问答历史
+  // 获取问答历史 - 已废弃，请使用会话模式
   getQuestionHistory: async (paperId: string): Promise<QuestionHistory[]> => {
-    try {
-      const response = await apiRequest(
-        `${API_BASE_URL}/api/paper/${paperId}/questions`,
-        {
-          method: 'GET'
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data.history;
-    } catch (error) {
-      console.error('Failed to get question history:', error);
-      throw error;
-    }
+    throw new Error('问答历史API已废弃，请使用会话模式');
   },
 
   // 获取支持的语言列表
@@ -525,13 +486,182 @@ export const paperAnalyzerApi = {
     }
   },
 
-  // streamMessage改为唯一的消息发送方法
+  // streamMessage改为唯一的消息发送方法，参考ChatGPT实现
   streamMessage: async (sessionId: string, message: string, callbacks: {
     onChunk: (chunk: any) => void;
     onComplete: (finalResponse: any) => void;
     onError: (error: any) => void;
   }) => {
     console.log(`[CHAT_API] Streaming message to session ${sessionId}, length: ${message.length} chars`);
+    
+    // 尝试使用SSE，如果不支持则降级到ReadableStream
+    const useSSE = typeof EventSource !== 'undefined';
+    
+    if (useSSE) {
+      // 使用SSE实现，参考ChatGPT
+      return paperAnalyzerApi.streamMessageWithSSE(sessionId, message, callbacks);
+    } else {
+      // 降级到ReadableStream实现
+      return paperAnalyzerApi.streamMessageWithStream(sessionId, message, callbacks);
+    }
+  },
+
+  // SSE优先的流式消息实现
+  streamMessageWithSSE: async (sessionId: string, message: string, callbacks: {
+    onChunk: (chunk: any) => void;
+    onComplete: (finalResponse: any) => void;
+    onError: (error: any) => void;
+  }) => {
+    try {
+      // 直接使用后端的stream端点，它返回SSE格式的数据
+      const response = await apiRequest(
+        `${API_BASE_URL}/api/chat-sessions/${sessionId}/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message })
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`[CHAT_API] Error streaming message: Status ${response.status}`);
+        callbacks.onError(new Error(`Failed to stream message: Status ${response.status}`));
+        return;
+      }
+
+      // 处理SSE流式响应
+      const reader = response.body?.getReader();
+      if (!reader) {
+        callbacks.onError(new Error('Stream reader not available'));
+        return;
+      }
+
+      let finalResponse: any = null;
+      let decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // 解码数据块
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          // 处理SSE格式的数据 (data: {json}\n\n)
+          let lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // 保留最后一个可能不完整的行
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6); // 移除 'data: ' 前缀
+              
+              if (data === '[DONE]') {
+                // 流结束
+                console.log('[SSE] Stream ended with [DONE] signal');
+                if (finalResponse) {
+                  callbacks.onComplete(finalResponse);
+                }
+                return;
+              }
+
+              try {
+                const jsonData = JSON.parse(data);
+                console.log('[SSE] Received data:', jsonData);
+                
+                // 处理不同类型的消息
+                if (jsonData.content && !jsonData.done && !jsonData.saved && !jsonData.content_complete) {
+                  // 流式内容块 - 正在接收AI回复的内容
+                  console.log('[SSE] Content chunk received:', jsonData.content.length, 'chars');
+                  callbacks.onChunk({
+                    delta: jsonData.content,
+                    done: false,
+                    message_id: jsonData.id || jsonData.message_id
+                  });
+                } else if (jsonData.message_id && jsonData.saved === true && jsonData.done === true) {
+                  // 最终保存确认 - 这是关键的确认信号，表示消息已成功保存到数据库
+                  console.log('[SSE] Backend save confirmation received:', jsonData.message_id);
+                  finalResponse = jsonData;
+                  callbacks.onChunk({
+                    delta: '',
+                    done: true,
+                    message_id: jsonData.message_id,
+                    saved: true,
+                    sources: jsonData.sources || [],
+                    confidence: jsonData.confidence || 0.0,
+                    reply: jsonData.reply || []
+                  });
+                  // 立即调用完成回调
+                  callbacks.onComplete(finalResponse);
+                  return;
+                } else if (jsonData.error) {
+                  // 错误处理
+                  console.error('[SSE] Error received:', jsonData.error);
+                  callbacks.onError(new Error(jsonData.error));
+                  return;
+                } else if ((jsonData.done === true || jsonData.content_complete === true) && !jsonData.saved && !jsonData.error) {
+                  // 内容流结束但没有保存确认 - 继续等待保存确认
+                  console.log('[SSE] Content stream done, waiting for save confirmation...');
+                  callbacks.onChunk({
+                    delta: '',
+                    done: false, // 设置为false，表示还在等待最终确认
+                    message_id: jsonData.id || jsonData.message_id,
+                    saved: false,
+                    content_complete: true
+                  });
+                  // 不要在这里调用onComplete，继续等待保存确认
+                } else if (jsonData.partial_response) {
+                  // 处理 partial_response 格式的内容
+                  console.log('[SSE] Partial response received:', jsonData.partial_response.length, 'chars');
+                  callbacks.onChunk({
+                    delta: jsonData.partial_response,
+                    done: jsonData.done || false,
+                    message_id: jsonData.id || jsonData.message_id
+                  });
+                } else {
+                  // 其他类型的消息，记录但不处理
+                  console.log('[SSE] Other message type:', jsonData);
+                }
+                
+              } catch (e) {
+                console.error('[SSE] Error parsing data:', e, data);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      // 如果循环结束但没有收到最终确认，使用最后的响应
+      if (finalResponse) {
+        console.log('[SSE] Stream ended, calling onComplete with final response');
+        callbacks.onComplete(finalResponse);
+      } else {
+        console.warn('[SSE] Stream ended without final response');
+        callbacks.onComplete({});
+      }
+
+      // 返回清理函数
+      return () => {
+        reader.cancel();
+      };
+      
+    } catch (error) {
+      console.error('[CHAT_API] Failed to setup SSE stream:', error);
+      callbacks.onError(error);
+    }
+  },
+
+  // 保留原有的ReadableStream实现作为降级方案
+  streamMessageWithStream: async (sessionId: string, message: string, callbacks: {
+    onChunk: (chunk: any) => void;
+    onComplete: (finalResponse: any) => void;
+    onError: (error: any) => void;
+  }) => {
     try {
       const response = await apiRequest(
         `${API_BASE_URL}/api/chat-sessions/${sessionId}/stream`,
@@ -579,39 +709,55 @@ export const paperAnalyzerApi = {
           if (jsonStr) {
             try {
               const jsonData = JSON.parse(jsonStr);
+              console.log('[Stream] Received data:', jsonData);
               
-              // 转换后端格式到前端期望的格式
-              if (jsonData.content) {
-                // 流式内容块
+              // 处理不同类型的消息 - 与SSE实现保持一致
+              if (jsonData.content && !jsonData.done && !jsonData.saved) {
+                // 流式内容块 - 正在接收AI回复的内容
+                console.log('[Stream] Content chunk received:', jsonData.content.length, 'chars');
                 callbacks.onChunk({
                   delta: jsonData.content,
-                  done: jsonData.done || false,
+                  done: false,
                   message_id: jsonData.message_id
                 });
-              } else if (jsonData.message_id && jsonData.saved) {
-                // 最终保存确认
+              } else if (jsonData.message_id && jsonData.saved === true && jsonData.done === true) {
+                // 最终保存确认 - 这是关键的确认信号，表示消息已成功保存到数据库
+                console.log('[Stream] Backend save confirmation received:', jsonData.message_id);
                 finalResponse = jsonData;
                 callbacks.onChunk({
                   delta: '',
                   done: true,
                   message_id: jsonData.message_id,
-                  saved: jsonData.saved
+                  saved: true,
+                  sources: jsonData.sources || [],
+                  confidence: jsonData.confidence || 0.0,
+                  reply: jsonData.reply || []
                 });
+                // 立即调用完成回调
+                callbacks.onComplete(finalResponse);
+                return;
               } else if (jsonData.error) {
                 // 错误处理
+                console.error('[Stream] Error received:', jsonData.error);
                 callbacks.onError(new Error(jsonData.error));
                 return;
+              } else if (jsonData.done === true && !jsonData.saved) {
+                // 流结束但没有保存确认 - 这种情况需要等待保存确认
+                console.log('[Stream] Stream done without save confirmation, waiting for save...');
+                callbacks.onChunk({
+                  delta: '',
+                  done: false, // 设置为false，等待保存确认
+                  message_id: jsonData.message_id,
+                  saved: false
+                });
+                // 不要在这里调用onComplete，等待保存确认
               } else {
-                // 其他数据直接传递
-                callbacks.onChunk(jsonData);
+                // 其他类型的消息，记录但不处理
+                console.log('[Stream] Other message type:', jsonData);
               }
               
-              // Save final response when receiving complete flag
-              if (jsonData.done || jsonData.saved) {
-                finalResponse = jsonData;
-              }
             } catch (e) {
-              console.error('Error parsing JSON chunk:', e, jsonStr);
+              console.error('[Stream] Error parsing JSON chunk:', e, jsonStr);
             }
           }
           startIndex = endIndex + 1;
@@ -625,42 +771,51 @@ export const paperAnalyzerApi = {
       if (partialData.trim()) {
         try {
           const jsonData = JSON.parse(partialData.trim());
+          console.log('[Stream] Processing remaining data:', jsonData);
           
-          // 转换后端格式到前端期望的格式
-          if (jsonData.content) {
+          // 使用与主循环相同的处理逻辑
+          if (jsonData.content && !jsonData.done && !jsonData.saved) {
             callbacks.onChunk({
               delta: jsonData.content,
-              done: jsonData.done || false,
+              done: false,
               message_id: jsonData.message_id
             });
-          } else if (jsonData.message_id && jsonData.saved) {
+          } else if (jsonData.message_id && jsonData.saved === true && jsonData.done === true) {
             finalResponse = jsonData;
             callbacks.onChunk({
               delta: '',
               done: true,
               message_id: jsonData.message_id,
-              saved: jsonData.saved
+              saved: true,
+              sources: jsonData.sources || [],
+              confidence: jsonData.confidence || 0.0,
+              reply: jsonData.reply || []
             });
+            callbacks.onComplete(finalResponse);
+            return;
           } else if (jsonData.error) {
             callbacks.onError(new Error(jsonData.error));
             return;
-          } else {
-            callbacks.onChunk(jsonData);
+          } else if (jsonData.done === true && !jsonData.saved) {
+            callbacks.onChunk({
+              delta: '',
+              done: false,
+              message_id: jsonData.message_id,
+              saved: false
+            });
           }
           
-          if (jsonData.done || jsonData.saved) {
-            finalResponse = jsonData;
-          }
         } catch (e) {
-          console.error('Error parsing final JSON chunk:', e);
+          console.error('[Stream] Error parsing final JSON chunk:', e);
         }
       }
 
       // Call onComplete with the final complete response
       if (finalResponse) {
+        console.log('[Stream] Stream ended, calling onComplete with final response');
         callbacks.onComplete(finalResponse);
       } else {
-        // If we never got a complete flag, send the last chunk
+        console.warn('[Stream] Stream ended without final response');
         callbacks.onComplete({});
       }
       

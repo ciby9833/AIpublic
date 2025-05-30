@@ -1,5 +1,5 @@
 # backend/models/chat.py 会话模型 会话关联主题和文档
-from sqlalchemy import Column, String, Text, DateTime, Integer, ForeignKey, Boolean, Float
+from sqlalchemy import Column, String, Text, DateTime, Integer, ForeignKey, Boolean, Float, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -64,3 +64,45 @@ class ChatFile(Base):
     description = Column(Text)  # 文件描述
     is_processed = Column(Boolean, default=False)  # 是否已处理
     processing_status = Column(String(20), default="pending")  # pending, processing, completed, failed
+
+# ✅ 新增网页收藏夹模型
+class WebBookmark(Base):
+    __tablename__ = "web_bookmarks"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    web_id = Column(UUID(as_uuid=True), ForeignKey('paper_analysis.paper_id'), nullable=False)
+    folder_name = Column(String(100), default="默认")  # 收藏夹分组
+    notes = Column(Text)  # 用户备注
+    tags = Column(ARRAY(String), server_default='{}')  # 用户标签
+    is_favorite = Column(Boolean, default=False)  # 是否加星标
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+# ✅ 新增内容类型枚举配置表
+class ContentTypeConfig(Base):
+    __tablename__ = "content_type_configs"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    content_type = Column(String(20), nullable=False)  # "document", "web", "mixed"
+    display_name = Column(String(50), nullable=False)  # 显示名称
+    icon = Column(String(50))  # 图标名称
+    color = Column(String(20))  # 颜色代码
+    description = Column(Text)  # 描述
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+
+# ✅ 新增智能推荐模型
+class ContentRecommendation(Base):
+    __tablename__ = "content_recommendations"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    content_id = Column(UUID(as_uuid=True), nullable=False)  # 推荐的内容ID
+    content_type = Column(String(20), nullable=False)  # "document" 或 "web"
+    recommendation_type = Column(String(20), nullable=False)  # "similar", "related", "trending"
+    score = Column(Float, default=0.0)  # 推荐分数
+    reason = Column(Text)  # 推荐理由
+    is_shown = Column(Boolean, default=False)  # 是否已展示
+    is_clicked = Column(Boolean, default=False)  # 是否已点击
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

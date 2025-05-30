@@ -223,6 +223,9 @@ export default {
       deleteSessionFailed: "删除失败: {{message}}",
       titleUpdated: "会话标题已更新",
       updateTitleFailed: "保存标题失败: {{message}}",
+      chatWelcomeTitle: "欢迎使用Cargo AI助手",
+      chatWelcomeDescription: "请输入您的问题或分享文件到对话",
+      uploadDocumentHint: "请上传文档或等待分析完成",
       
       // 输入区域
       inputPlaceholder: "请输入您的问题或拖拽文件到此处",

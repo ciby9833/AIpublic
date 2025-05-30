@@ -1,3 +1,4 @@
+# 文件：backend/services/paper_analyzer/paper_processor.py    实现文档处理
 import PyPDF2
 from io import BytesIO
 import docx
@@ -22,22 +23,61 @@ import concurrent.futures
 from functools import partial
 import re
 import subprocess
+from .web_processor import WebProcessor, WebProcessingConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ProcessingConfig:
-    """文档处理配置"""
+    """文档处理配置类 - 增强配置选项"""
     def __init__(self, 
                  extract_for_rag: bool = True,
                  generate_summary: bool = True,
                  max_file_size_mb: int = 50,
                  chunk_size: int = 512,
                  overlap: int = 50,
-                 batch_size: int = 5):
+                 batch_size: int = 5,
+                 # 新增配置选项
+                 enable_ocr: bool = True,
+                 ocr_language: str = 'chi_sim+eng',
+                 enable_smart_parsing: bool = True,
+                 preserve_formatting: bool = True,
+                 extract_tables: bool = True,
+                 extract_images: bool = False,
+                 quality_threshold: float = 0.8,
+                 parallel_processing: bool = True,
+                 cache_processing_results: bool = True):
+        """
+        增强的文档处理配置
+        
+        新增参数:
+        - enable_ocr: 是否启用OCR功能
+        - ocr_language: OCR识别语言设置
+        - enable_smart_parsing: 启用智能解析（表格、列表等结构）
+        - preserve_formatting: 保留原始格式
+        - extract_tables: 提取表格数据
+        - extract_images: 提取图片（暂不支持）
+        - quality_threshold: 处理质量阈值
+        - parallel_processing: 并行处理多页文档
+        - cache_processing_results: 缓存处理结果
+        """
         self.extract_for_rag = extract_for_rag
         self.generate_summary = generate_summary
         self.max_file_size_mb = max_file_size_mb
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.batch_size = batch_size
+        
+        # 新增配置
+        self.enable_ocr = enable_ocr
+        self.ocr_language = ocr_language
+        self.enable_smart_parsing = enable_smart_parsing
+        self.preserve_formatting = preserve_formatting
+        self.extract_tables = extract_tables
+        self.extract_images = extract_images
+        self.quality_threshold = quality_threshold
+        self.parallel_processing = parallel_processing
+        self.cache_processing_results = cache_processing_results
 
 class PaperProcessor:
     def __init__(self):
@@ -66,6 +106,18 @@ class PaperProcessor:
         
         # 线程池用于并行处理任务
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        
+        # 添加网页处理器
+        self.web_processor_config = WebProcessingConfig(
+            extract_text=True,
+            extract_links=True,
+            extract_tables=True,
+            extract_code=True,
+            chunk_size=512,
+            chunk_overlap=50
+        )
+        
+        logger.info(f"[PAPER_PROCESSOR_INIT] 文档处理器初始化完成，包含网页处理能力")
 
     async def process(self, file_content: bytes, filename: str, extract_for_rag: bool = True) -> dict:
         """处理不同类型的文档文件，返回包含行号信息的内容"""
@@ -917,3 +969,80 @@ class PaperProcessor:
         text = re.sub(r'\n{3,}', '\n\n', text)
         
         return text.strip()
+
+    async def process_url(self, url: str, **kwargs) -> dict:
+        """处理网页URL - 新增方法"""
+        try:
+            logger.info(f"[PROCESS_URL] 开始处理URL: {url}")
+            
+            async with WebProcessor(self.web_processor_config) as web_processor:
+                # 处理网页内容
+                web_result = await web_processor.process_url(url)
+                
+                # 转换为统一格式
+                processed_result = {
+                    "content": web_result["content"],
+                    "line_mapping": self._convert_web_chunks_to_line_mapping(web_result["chunks"]),
+                    "total_lines": len(web_result["chunks"]),
+                    "structured_data": web_result["structured_data"],
+                    "metadata": web_result["metadata"],
+                    "source_url": url,
+                    "title": web_result["title"]
+                }
+                
+                logger.info(f"[PROCESS_URL_SUCCESS] URL处理成功: {url}")
+                return processed_result
+                
+        except Exception as e:
+            logger.error(f"[PROCESS_URL_ERROR] URL处理失败: {url} - {str(e)}")
+            raise Exception(f"URL处理失败: {str(e)}")
+
+    async def process_multiple_urls(self, urls: List[str], **kwargs) -> List[dict]:
+        """批量处理多个URL - 新增方法"""
+        try:
+            logger.info(f"[PROCESS_URLS_BATCH] 开始批量处理URL - 数量: {len(urls)}")
+            
+            async with WebProcessor(self.web_processor_config) as web_processor:
+                # 批量处理
+                web_results = await web_processor.process_multiple_urls(urls)
+                
+                # 转换为统一格式
+                processed_results = []
+                for web_result in web_results:
+                    if not web_result.get("error"):
+                        processed_result = {
+                            "content": web_result["content"],
+                            "line_mapping": self._convert_web_chunks_to_line_mapping(web_result["chunks"]),
+                            "total_lines": len(web_result["chunks"]),
+                            "structured_data": web_result["structured_data"],
+                            "metadata": web_result["metadata"],
+                            "source_url": web_result["url"],
+                            "title": web_result["title"]
+                        }
+                        processed_results.append(processed_result)
+                    else:
+                        logger.error(f"[PROCESS_URLS_BATCH_ERROR] URL处理失败: {web_result['url']}")
+                
+                logger.info(f"[PROCESS_URLS_BATCH_SUCCESS] 批量URL处理完成 - 成功: {len(processed_results)}/{len(urls)}")
+                return processed_results
+                
+        except Exception as e:
+            logger.error(f"[PROCESS_URLS_BATCH_ERROR] 批量URL处理失败: {str(e)}")
+            raise Exception(f"批量URL处理失败: {str(e)}")
+
+    def _convert_web_chunks_to_line_mapping(self, chunks: List[Dict]) -> Dict[str, Dict]:
+        """将网页分块转换为line_mapping格式"""
+        line_mapping = {}
+        
+        for i, chunk in enumerate(chunks):
+            line_key = str(i + 1)  # 行号从1开始
+            line_mapping[line_key] = {
+                "content": chunk.get("content", ""),
+                "start_pos": chunk.get("start_pos", 0),
+                "end_pos": chunk.get("end_pos", 0),
+                "chunk_index": chunk.get("chunk_index", i),
+                "source_url": chunk.get("source_url", ""),
+                "is_web_chunk": True  # 标记为网页分块
+            }
+        
+        return line_mapping

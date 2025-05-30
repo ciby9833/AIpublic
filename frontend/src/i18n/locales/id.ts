@@ -212,6 +212,9 @@ export default {
       deleteSessionFailed: "Gagal menghapus: {{message}}",
       titleUpdated: "Judul sesi diperbarui",
       updateTitleFailed: "Gagal menyimpan judul: {{message}}",
+      chatWelcomeTitle: "Selamat datang di Asisten AI Cargo",
+      chatWelcomeDescription: "Silakan masukkan pertanyaan Anda atau seret file ke sini",
+      uploadDocumentHint: "Silakan unggah dokumen atau tunggu analisis selesai",
       
       // Area input
       inputPlaceholder: "Masukkan pertanyaan Anda atau seret file ke sini",

@@ -465,63 +465,15 @@ export const aiChatService = {
     }
   },
 
-  // 5. 文档问答
-  // 5.1 向文档提问
+  // 5. 文档问答 - 已废弃，请使用会话模式
+  // 5.1 向文档提问 - 已废弃
   askDocumentQuestion: async (question: string, paperId: string): Promise<any> => {
-    try {
-      console.log(`[AI_CHAT] Asking question to document ${paperId}`);
-      
-      const response = await apiRequest(
-        `${API_BASE_URL}/api/paper/ask`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ question, paper_id: paperId })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log(`[AI_CHAT] Question answered successfully`);
-      
-      return result;
-    } catch (error) {
-      console.error('[AI_CHAT] Failed to ask document question:', error);
-      throw error;
-    }
+    throw new Error('单次问答模式已废弃，请使用会话模式');
   },
   
-  // 5.2 获取问答历史
+  // 5.2 获取问答历史 - 已废弃
   getQuestionHistory: async (paperId: string): Promise<any[]> => {
-    try {
-      console.log(`[AI_CHAT] Fetching question history for document ${paperId}`);
-      
-      const response = await apiRequest(
-        `${API_BASE_URL}/api/paper/${paperId}/questions`,
-        {
-          method: 'GET'
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail?.message || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log(`[AI_CHAT] Fetched question history successfully`);
-      
-      return data.history || [];
-    } catch (error) {
-      console.error('[AI_CHAT] Failed to fetch question history:', error);
-      throw error;
-    }
+    throw new Error('问答历史API已废弃，请使用会话模式');
   },
   
   // 获取文档内容

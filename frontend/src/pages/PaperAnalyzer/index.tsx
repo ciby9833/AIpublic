@@ -59,6 +59,7 @@ const PaperAnalyzer: React.FC = () => {
   const [languages, setLanguages] = useState<Record<string, string>>({});
   const [translationLoading, setTranslationLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [showDocumentPane, setShowDocumentPane] = useState<boolean>(false);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [sending, setSending] = useState(false);
   const [lineMapping, setLineMapping] = useState<LineMapping>({});
@@ -90,6 +91,21 @@ const PaperAnalyzer: React.FC = () => {
     partialMessage: ''
   });
   const [isComposing, setIsComposing] = useState(false);
+  const [streamController, setStreamController] = useState<(() => void) | null>(null); // 用于中断流式响应
+  const [contentBuffer, setContentBuffer] = useState<string>(''); // 内容缓冲区
+  const [formatState, setFormatState] = useState<{
+    type: 'text' | 'code' | 'markdown' | 'table';
+    buffer: string;
+    language?: string;
+  }>({ type: 'text', buffer: '' }); // 格式状态机
+  
+  // 使用useRef保存实时的流式内容，避免React状态更新异步问题
+  const streamingContentRef = useRef<string>('');
+
+  // 定义消息消失相关的状态和引用
+  const [isStreamingInProgress, setIsStreamingInProgress] = useState(false); // 流式处理状态标记
+  const [pendingStreamMessages, setPendingStreamMessages] = useState<Set<string>>(new Set()); // 正在流式传输的消息ID
+  const streamingSessionRef = useRef<string | null>(null); // 当前流式处理的会话ID
 
   // 检测是否为移动设备并重定向
   useEffect(() => {
@@ -134,6 +150,128 @@ const PaperAnalyzer: React.FC = () => {
     
     return () => clearInterval(interval);
   }, [navigate]);
+
+  // 智能格式推断函数，参考ChatGPT实现
+  const analyzeContentFormat = (text: string): {
+    type: 'text' | 'code' | 'markdown' | 'table';
+    language?: string;
+    shouldBuffer: boolean;
+  } => {
+    // 检测代码块
+    if (text.includes('```')) {
+      const codeBlockMatch = text.match(/```(\w+)?/);
+      return {
+        type: 'code',
+        language: codeBlockMatch?.[1] || 'text',
+        shouldBuffer: !text.includes('```\n') || text.split('```').length < 3
+      };
+    }
+    
+    // 检测表格
+    if (text.includes('|') && text.split('\n').some(line => line.includes('|'))) {
+      const lines = text.split('\n');
+      const tableLines = lines.filter(line => line.includes('|'));
+      if (tableLines.length >= 2) {
+        return {
+          type: 'table',
+          shouldBuffer: tableLines.length < 3 // 缓存直到有足够的行
+        };
+      }
+    }
+    
+    // 检测Markdown
+    if (/^[#*\-+>]|\[.*\]\(.*\)/.test(text.trim())) {
+      return {
+        type: 'markdown',
+        shouldBuffer: false // Markdown可以实时渲染
+      };
+    }
+    
+    return {
+      type: 'text',
+      shouldBuffer: false
+    };
+  };
+
+  // 打字机效果函数，参考ChatGPT实现
+  const typewriterEffect = (text: string, callback: (char: string) => void, speed: number = 30) => {
+    let index = 0;
+    const interval = setInterval(() => {
+      if (index >= text.length) {
+        clearInterval(interval);
+        return;
+      }
+      callback(text[index]);
+      index++;
+    }, speed);
+    return interval;
+  };
+
+  // 处理流式内容的智能分块
+  const processStreamChunk = (chunk: string) => {
+    // 同时更新ref和状态，确保内容不丢失
+    streamingContentRef.current += chunk;
+    
+    // ✅ 优化：智能格式检测和缓冲
+    const currentContent = streamingContentRef.current;
+    
+    // 检测当前内容的格式类型
+    const formatAnalysis = analyzeContentFormat(currentContent);
+    
+    // 如果需要缓冲（例如代码块还没完整），则暂时不更新显示
+    if (formatAnalysis.shouldBuffer && formatAnalysis.type !== 'text') {
+      setContentBuffer(prev => prev + chunk);
+      console.log(`[Stream] Buffering ${formatAnalysis.type} content...`);
+      return;
+    }
+    
+    // 如果有缓冲内容，一起更新
+    let displayContent = currentContent;
+    if (contentBuffer) {
+      displayContent = contentBuffer + chunk;
+      setContentBuffer(''); // 清空缓冲区
+    }
+    
+    // 更新React状态用于UI显示
+    setStreamingState(prev => ({
+      ...prev,
+      isStreaming: true,
+      partialMessage: displayContent
+    }));
+    
+    console.log(`[Stream] Updated display with ${displayContent.length} chars (type: ${formatAnalysis.type})`);
+  };
+
+  // 中断流式响应
+  const stopStreaming = () => {
+    if (streamController) {
+      try {
+        streamController();
+        console.log('流式传输已停止');
+      } catch (error) {
+        console.error('停止流式传输时出错:', error);
+      }
+    }
+    
+    // ✅ 关键修复：重置所有流式状态
+    setStreamingState({
+      isStreaming: false,
+      partialMessage: ''
+    });
+    
+    setContentBuffer('');
+    setFormatState({ type: 'text', buffer: '' });
+    streamingContentRef.current = '';
+    setStreamController(null);
+    setSending(false);
+    
+    // ✅ 关键修复：重置流式处理状态
+    setIsStreamingInProgress(false);
+    streamingSessionRef.current = null;
+    setPendingStreamMessages(new Set());
+    
+    console.log('流式状态已重置');
+  };
 
   // 1. 首先改进scrollToBottom函数，使其更可靠
   const scrollToBottom = (delay = 100) => {
@@ -200,11 +338,15 @@ const PaperAnalyzer: React.FC = () => {
           setDocumentContent(result.content);
           setLineMapping({});
           setTotalLines(result.total_lines || result.content.split('\n').length);
+          // 文档加载成功后自动显示文档栏位
+          setShowDocumentPane(true);
         } else {
           const contentData = await paperAnalyzerApi.getDocumentContent(result.paper_id);
           setDocumentContent(contentData.content);
           setLineMapping(contentData.line_mapping || {});
           setTotalLines(contentData.total_lines || 0);
+          // 文档加载成功后自动显示文档栏位
+          setShowDocumentPane(true);
         }
         message.success(t('paperAnalyzer.documentAnalysisComplete'));
         
@@ -262,34 +404,152 @@ const PaperAnalyzer: React.FC = () => {
         // 5. 添加分析完成的消息并持久化到后端
         // 先添加到本地状态
         try {
+          // ✅ 关键修复：设置流式处理状态
+          setIsStreamingInProgress(true);
+          streamingSessionRef.current = sessionId;
+          
           // 使用流式API发送消息
           await paperAnalyzerApi.streamMessage(
             sessionId,
             t('paperAnalyzer.fileAnalysisComplete', { filename: file.name }),
             {
               onChunk: (chunk) => {
+                console.log('[Frontend FileUpload] Received chunk:', chunk);
+                
                 if (chunk.delta) {
-                  setStreamingState(prev => ({
-                    isStreaming: true,
-                    partialMessage: prev.partialMessage + chunk.delta,
-                    messageId: chunk.message_id || prev.messageId
-                  }));
+                  // 流式内容块 - 正在接收AI回复的内容
+                  console.log('[Frontend FileUpload] Processing content delta:', chunk.delta.length, 'chars');
+                  processStreamChunk(chunk.delta);
+                  // ✅ 优化：减少频繁滚动，使用节流
+                  if (streamingContentRef.current.length % 100 === 0) {
+                    scrollToBottom();
+                  }
+                } else if (chunk.saved === true && chunk.message_id) {
+                  // 后端保存确认 - 这是关键的确认信号
+                  console.log('[Frontend FileUpload] Backend save confirmation received in onChunk:', chunk.message_id);
+                  
+                  // 使用ref中的实时内容，避免React状态异步更新问题
+                  const currentStreamContent = streamingContentRef.current;
+                  
+                  // 创建AI消息对象，使用后端确认的message_id
+                  const aiMessage: ChatMessageType = {
+                    id: chunk.message_id,
+                    role: 'assistant',
+                    content: currentStreamContent,
+                    created_at: new Date().toISOString(),
+                    sources: chunk.sources || [],
+                    confidence: chunk.confidence || 0.0
+                  };
+                  
+                  // 直接添加到现有消息列表
+                  setResponses(prev => [...prev, aiMessage]);
+                  console.log('[Frontend FileUpload] AI message added with backend confirmation:', aiMessage.id);
+                  
+                  // ✅ 优化：重置流式状态，移除不必要的延迟
+                  streamingContentRef.current = '';
+                  setStreamingState({
+                    isStreaming: false,
+                    partialMessage: ''
+                  });
+                  
+                  // 清空缓冲区和格式状态
+                  setContentBuffer('');
+                  setFormatState({ type: 'text', buffer: '' });
+                  setStreamController(null);
+                  
+                  // ✅ 优化：减少延迟，快速重置状态
+                  setIsStreamingInProgress(false);
+                  streamingSessionRef.current = null;
+                  
+                  // ✅ 优化：最终滚动到底部
                   scrollToBottom();
+                  setSending(false);
+                } else if (chunk.done === true && !chunk.saved) {
+                  // 流结束但没有保存确认 - 等待保存确认
+                  console.log('[Frontend FileUpload] Stream done without save confirmation, waiting...');
+                } else {
+                  // 其他类型的chunk，记录但不处理
+                  console.log('[Frontend FileUpload] Other chunk type:', chunk);
                 }
               },
-              onComplete: async () => {
-                // 重新获取消息历史
-                const result = await paperAnalyzerApi.getChatHistory(sessionId, 20);
-                if (result && result.messages && Array.isArray(result.messages)) {
-                  setResponses(result.messages);
-                  setHasMoreMessages(result.has_more || false);
-                  if (result.messages.length > 0) {
-                    setLastMessageId(result.messages[0].id || null);
+              onComplete: async (finalResponse) => {
+                console.log('[Frontend FileUpload] Stream completed, finalResponse:', finalResponse);
+                
+                // 如果在onChunk中已经处理了保存确认，这里就不需要再处理了
+                if (finalResponse?.saved === true && finalResponse?.message_id) {
+                  console.log('[Frontend FileUpload] Final response already processed in onChunk');
+                  return;
+                }
+                
+                // 使用ref中的实时内容，避免React状态异步更新问题
+                const currentStreamContent = streamingContentRef.current;
+                
+                // 检查是否收到后端保存确认
+                const isMessageSaved = finalResponse?.saved === true && finalResponse?.message_id;
+                
+                if (isMessageSaved) {
+                  console.log('[Frontend FileUpload] Message confirmed saved by backend in onComplete:', finalResponse.message_id);
+                  
+                  // 创建AI消息对象，使用后端确认的message_id
+                  const aiMessage: ChatMessageType = {
+                    id: finalResponse.message_id,
+                    role: 'assistant',
+                    content: currentStreamContent,
+                    created_at: new Date().toISOString(),
+                    sources: finalResponse?.sources || [],
+                    confidence: finalResponse?.confidence || 0.0
+                  };
+                  
+                  // 直接添加到现有消息列表
+                  setResponses(prev => [...prev, aiMessage]);
+                  console.log('[Frontend FileUpload] AI message added with backend confirmation in onComplete:', aiMessage.id);
+                } else {
+                  console.warn('[Frontend FileUpload] No backend save confirmation received, creating temporary message');
+                  
+                  // 如果没有收到保存确认，创建临时消息并标记
+                  if (currentStreamContent.trim()) {
+                    const tempAiMessage: ChatMessageType = {
+                      id: `temp-ai-${Date.now()}`,
+                      role: 'assistant',
+                      content: currentStreamContent + '\n\n⚠️ 消息可能未完全保存',
+                      created_at: new Date().toISOString(),
+                      sources: finalResponse?.sources || [],
+                      confidence: finalResponse?.confidence || 0.0
+                    };
+                    
+                    setResponses(prev => [...prev, tempAiMessage]);
+                    console.warn('[Frontend FileUpload] Added temporary message without backend confirmation');
                   }
                 }
+                
+                // Reset streaming state and ref
+                streamingContentRef.current = '';
+                setStreamingState({
+                  isStreaming: false,
+                  partialMessage: ''
+                });
+                
+                // 清空缓冲区和格式状态
+                setContentBuffer('');
+                setFormatState({ type: 'text', buffer: '' });
+                setStreamController(null);
+                
+                // ✅ 优化：减少延迟，快速重置状态
+                setIsStreamingInProgress(false);
+                streamingSessionRef.current = null;
+                
+                // ✅ 优化：最终滚动到底部
+                scrollToBottom();
+                setSending(false);
               },
               onError: (error) => {
                 console.error("保存分析完成消息失败:", error);
+                
+                // ✅ 关键修复：错误处理时重置状态
+                setTimeout(() => {
+                  setIsStreamingInProgress(false);
+                  streamingSessionRef.current = null;
+                }, 100);
               }
             }
           );
@@ -302,28 +562,28 @@ const PaperAnalyzer: React.FC = () => {
           });
           setSending(false);
         }
-              } else {
-          message.error(result.message || t('paperAnalyzer.documentAnalysisFailed'));
-        }
-      } catch (error: any) {
-        console.error('Analysis error:', error);
+      } else {
+        message.error(result.message || t('paperAnalyzer.documentAnalysisFailed'));
+      }
+    } catch (error: any) {
+      console.error('Analysis error:', error);
+      
+      if (error.message && error.message.includes("一个会话最多支持10个文档")) {
+        message.error({
+          content: t('paperAnalyzer.sessionDocumentLimitReached'),
+          duration: 5
+        });
         
-        if (error.message && error.message.includes("一个会话最多支持10个文档")) {
-          message.error({
-            content: t('paperAnalyzer.sessionDocumentLimitReached'),
-            duration: 5
-          });
-          
-          Modal.confirm({
-            title: t('paperAnalyzer.documentLimitTitle'),
-            content: t('paperAnalyzer.documentLimitContent'),
-            okText: t('paperAnalyzer.createNewSession'),
-            cancelText: t('paperAnalyzer.cancel'),
-            onOk: handleNewChat
-          });
-        } else {
-          message.error(t('paperAnalyzer.documentAnalysisFailed'));
-        }
+        Modal.confirm({
+          title: t('paperAnalyzer.documentLimitTitle'),
+          content: t('paperAnalyzer.documentLimitContent'),
+          okText: t('paperAnalyzer.createNewSession'),
+          cancelText: t('paperAnalyzer.cancel'),
+          onOk: handleNewChat
+        });
+      } else {
+        message.error(t('paperAnalyzer.documentAnalysisFailed'));
+      }
     } finally {
       setAnalyzing(false);
       setLoading(false);
@@ -386,9 +646,16 @@ const PaperAnalyzer: React.FC = () => {
       }
       
       try {
+        // ✅ 关键修复：设置流式处理状态
+        setIsStreamingInProgress(true);
+        streamingSessionRef.current = sessionId;
+        
+        const userMessageId = `user-${Date.now()}`;
+        setPendingStreamMessages(prev => new Set([...prev, userMessageId]));
+        
         // 1. 立即添加用户消息到消息列表
         const userMessage: ChatMessageType = {
-          id: `user-${Date.now()}`,
+          id: userMessageId,
           role: 'user',
           content: questionText,
           created_at: new Date().toISOString()
@@ -409,61 +676,237 @@ const PaperAnalyzer: React.FC = () => {
           questionText,
           {
             onChunk: (chunk) => {
+              console.log('[Frontend] Received chunk:', chunk);
+              
               if (chunk.delta) {
-                setStreamingState(prev => ({
-                  isStreaming: true,
-                  partialMessage: prev.partialMessage + chunk.delta,
-                  messageId: chunk.message_id || prev.messageId
-                }));
+                // 流式内容块 - 正在接收AI回复的内容
+                console.log('[Frontend] Processing content delta:', chunk.delta.length, 'chars');
+                processStreamChunk(chunk.delta);
+                // ✅ 优化：减少频繁滚动，使用节流
+                if (streamingContentRef.current.length % 100 === 0) {
+                  scrollToBottom();
+                }
+              } else if (chunk.saved === true && chunk.message_id) {
+                // 后端保存确认 - 这是关键的确认信号
+                console.log('[Frontend] Backend save confirmation received in onChunk:', chunk.message_id);
+                
+                // ✅ 关键修复：移除待处理的消息ID
+                setPendingStreamMessages(prev => {
+                  const newSet = new Set(prev);
+                  newSet.delete(userMessageId);
+                  return newSet;
+                });
+                
+                // 使用ref中的实时内容，避免React状态异步更新问题
+                const currentStreamContent = streamingContentRef.current;
+                
+                // 创建AI消息对象，使用后端确认的message_id
+                const aiMessage: ChatMessageType = {
+                  id: chunk.message_id,
+                  role: 'assistant',
+                  content: currentStreamContent,
+                  created_at: new Date().toISOString(),
+                  sources: chunk.sources || [],
+                  confidence: chunk.confidence || 0.0
+                };
+                
+                // 直接添加到现有消息列表
+                setResponses(prev => [...prev, aiMessage]);
+                console.log('[Frontend] AI message added with backend confirmation:', aiMessage.id);
+                
+                // ✅ 优化：重置流式状态，移除不必要的延迟
+                streamingContentRef.current = '';
+                setStreamingState({
+                  isStreaming: false,
+                  partialMessage: ''
+                });
+                
+                // 清空缓冲区和格式状态
+                setContentBuffer('');
+                setFormatState({ type: 'text', buffer: '' });
+                setStreamController(null);
+                
+                // ✅ 优化：减少延迟，快速重置状态
+                setIsStreamingInProgress(false);
+                streamingSessionRef.current = null;
+                
+                // ✅ 优化：最终滚动到底部
                 scrollToBottom();
+                setSending(false);
+              } else if (chunk.done === true && !chunk.saved) {
+                // 流结束但没有保存确认 - 等待保存确认
+                console.log('[Frontend] Stream done without save confirmation, waiting...');
+              } else {
+                // 其他类型的chunk，记录但不处理
+                console.log('[Frontend] Other chunk type:', chunk);
               }
             },
             onComplete: async (finalResponse) => {
-              // Reset streaming state
+              console.log('[Frontend] Stream completed, finalResponse:', finalResponse);
+              
+              // 如果在onChunk中已经处理了保存确认，这里就不需要再处理了
+              if (finalResponse?.saved === true && finalResponse?.message_id) {
+                console.log('[Frontend] Final response already processed in onChunk');
+                return;
+              }
+              
+              // 使用ref中的实时内容，避免React状态异步更新问题
+              const currentStreamContent = streamingContentRef.current;
+              
+              // 检查是否收到后端保存确认
+              const isMessageSaved = finalResponse?.saved === true && finalResponse?.message_id;
+              
+              if (isMessageSaved) {
+                console.log('[Frontend] Message confirmed saved by backend in onComplete:', finalResponse.message_id);
+                
+                // ✅ 关键修复：移除待处理的消息ID
+                setPendingStreamMessages(prev => {
+                  const newSet = new Set(prev);
+                  newSet.delete(userMessageId);
+                  return newSet;
+                });
+                
+                // 创建AI消息对象，使用后端确认的message_id
+                const aiMessage: ChatMessageType = {
+                  id: finalResponse.message_id,
+                  role: 'assistant',
+                  content: currentStreamContent,
+                  created_at: new Date().toISOString(),
+                  sources: finalResponse?.sources || [],
+                  confidence: finalResponse?.confidence || 0.0
+                };
+                
+                // 直接添加到现有消息列表
+                setResponses(prev => [...prev, aiMessage]);
+                console.log('[Frontend] AI message added with backend confirmation in onComplete:', aiMessage.id);
+              } else {
+                console.warn('[Frontend] No backend save confirmation received, creating temporary message');
+                
+                // 如果没有收到保存确认，创建临时消息并标记
+                if (currentStreamContent.trim()) {
+                  const tempAiMessage: ChatMessageType = {
+                    id: `temp-ai-${Date.now()}`,
+                    role: 'assistant',
+                    content: currentStreamContent + '\n\n⚠️ 消息可能未完全保存',
+                    created_at: new Date().toISOString(),
+                    sources: finalResponse?.sources || [],
+                    confidence: finalResponse?.confidence || 0.0
+                  };
+                  
+                  setResponses(prev => [...prev, tempAiMessage]);
+                  console.warn('[Frontend] Added temporary message without backend confirmation');
+                }
+              }
+              
+              // ✅ 优化：重置流式状态，移除不必要的延迟
+              streamingContentRef.current = '';
               setStreamingState({
                 isStreaming: false,
                 partialMessage: ''
               });
               
-              // 获取完整的消息列表并完全替换当前的responses
-              const updatedMessages = await paperAnalyzerApi.getChatHistory(sessionId, 20);
-              if (updatedMessages && updatedMessages.messages) {
-                setResponses(updatedMessages.messages);
-                setHasMoreMessages(updatedMessages.has_more || false);
-                if (updatedMessages.messages.length > 0) {
-                  setLastMessageId(updatedMessages.messages[0].id || null);
-                }
-              }
+              // 清空缓冲区和格式状态
+              setContentBuffer('');
+              setFormatState({ type: 'text', buffer: '' });
+              setStreamController(null);
               
-              // Final scroll to bottom
+              // ✅ 优化：减少延迟，快速重置状态
+              setIsStreamingInProgress(false);
+              streamingSessionRef.current = null;
+              
+              // ✅ 优化：最终滚动到底部
               scrollToBottom();
               setSending(false);
             },
             onError: (error) => {
               console.error("消息流处理失败:", error);
+              
+              // ✅ 关键修复：清理状态
+              setPendingStreamMessages(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(userMessageId);
+                return newSet;
+              });
+              
+              // 使用ref中的实时内容
+              const currentStreamContent = streamingContentRef.current;
+              
+              // 如果有部分内容，保留它
+              if (currentStreamContent.trim()) {
+                const tempAiMessage: ChatMessageType = {
+                  id: `temp-ai-error-${Date.now()}`,
+                  role: 'assistant',
+                  content: currentStreamContent + '\n\n⚠️ 消息传输中断',
+                  created_at: new Date().toISOString()
+                };
+                setResponses(prev => [...prev, tempAiMessage]);
+              }
+              
               message.error(t('paperAnalyzer.sendFailed'));
+              
+              // ✅ 关键修复：重置状态和ref
+              streamingContentRef.current = '';
               setStreamingState({
                 isStreaming: false,
                 partialMessage: ''
               });
+              setContentBuffer('');
+              setFormatState({ type: 'text', buffer: '' });
+              setStreamController(null);
+              
+              // 重置流式处理状态
+              setTimeout(() => {
+                setIsStreamingInProgress(false);
+                streamingSessionRef.current = null;
+                setPendingStreamMessages(new Set());
+              }, 100);
+              
               setSending(false);
             }
           }
-        );
+        ).then((cleanup) => {
+          // 保存清理函数用于中断
+          if (cleanup && typeof cleanup === 'function') {
+            setStreamController(() => cleanup);
+          }
+        });
       } catch (error) {
         console.error("发送消息失败:", error);
         message.error(t('paperAnalyzer.sendFailed'));
+        
+        // ✅ 关键修复：错误处理时也要重置状态
         setStreamingState({
           isStreaming: false,
           partialMessage: ''
         });
+        setContentBuffer('');
+        setFormatState({ type: 'text', buffer: '' });
+        setStreamController(null);
+        
+        setTimeout(() => {
+          setIsStreamingInProgress(false);
+          streamingSessionRef.current = null;
+          setPendingStreamMessages(new Set());
+        }, 100);
+        
         setSending(false);
       }
     } catch (error) {
       console.error("处理问题失败:", error);
       message.error(t('paperAnalyzer.processingFailed'));
+      
+      // ✅ 关键修复：最终错误处理
+      setTimeout(() => {
+        setIsStreamingInProgress(false);
+        streamingSessionRef.current = null;
+        setPendingStreamMessages(new Set());
+      }, 100);
+      
       setSending(false);
     }
+    
+    // Clear the input after sending
+    setQuestion('');
   };
 
   // 获取支持的语言列表
@@ -760,6 +1203,13 @@ const PaperAnalyzer: React.FC = () => {
       return;
     }
     
+    // ✅ 关键修复：防止在流式处理期间加载会话
+    if (isStreamingInProgress && streamingSessionRef.current === sessionId) {
+      console.log("流式处理进行中，跳过会话重新加载:", sessionId);
+      setShowSessions(false);
+      return;
+    }
+    
     try {
       setLoading(true);
       
@@ -775,17 +1225,29 @@ const PaperAnalyzer: React.FC = () => {
         setSessionTitle(currentSession.title || t('paperAnalyzer.unnamedSession'));
       }
       
-      // 设置消息内容 - 使用标准格式
-      if (result && result.messages) {
-        setResponses(result.messages);
-        setHasMoreMessages(result.has_more || false);
-        if (result.messages.length > 0) {
-          setLastMessageId(result.messages[0].id || null);
+      // ✅ 关键修复：只有在非流式处理期间才完全替换消息列表
+      if (!isStreamingInProgress) {
+        // 设置消息内容 - 使用标准格式
+        if (result && result.messages) {
+          setResponses(result.messages);
+          setHasMoreMessages(result.has_more || false);
+          if (result.messages.length > 0) {
+            setLastMessageId(result.messages[0].id || null);
+          }
+        } else {
+          setResponses([]);
+          setHasMoreMessages(false);
+          setLastMessageId(null);
         }
       } else {
-        setResponses([]);
-        setHasMoreMessages(false);
-        setLastMessageId(null);
+        console.log("流式处理进行中，保持当前消息状态");
+        // 只更新 hasMoreMessages 和 lastMessageId
+        if (result && result.messages) {
+          setHasMoreMessages(result.has_more || false);
+          if (result.messages.length > 0) {
+            setLastMessageId(result.messages[0].id || null);
+          }
+        }
       }
       
       try {
@@ -899,6 +1361,9 @@ const PaperAnalyzer: React.FC = () => {
       setLineMapping(contentData.line_mapping || {});
       setTotalLines(contentData.total_lines || contentData.content.split('\n').length);
       
+      // 加载文档后自动显示文档栏位
+      setShowDocumentPane(true);
+      
       message.success(t('paperAnalyzer.documentLoaded', { filename }));
     } catch (error) {
       console.error('加载文档失败:', error);
@@ -999,6 +1464,9 @@ const PaperAnalyzer: React.FC = () => {
     setSelectedFile(null);
     setCurrentPaperId("");
     setDocumentContent("");
+    // 新建聊天时隐藏文档栏位
+    setShowDocumentPane(false);
+    setTranslatedContent("");
   };
 
   // Modify the toggleDocumentsList function
@@ -1092,13 +1560,16 @@ const PaperAnalyzer: React.FC = () => {
   }, [streamingState]);
 
   return (
-    <Layout className="paper-analyzer-layout">
+    <Layout className={`paper-analyzer-layout ${!showDocumentPane ? 'chat-only-mode' : ''}`}>
       <Sider 
-        width={siderWidth}
+        width={showDocumentPane ? siderWidth : undefined}
         collapsible={false}
         collapsed={collapsed}
-        className="paper-analyzer-sider"
-        style={{ transition: isResizing ? 'none' : '' }}
+        className={`paper-analyzer-sider ${!showDocumentPane ? 'full-width' : ''}`}
+        style={{ 
+          transition: isResizing ? 'none' : '',
+          width: !showDocumentPane ? '100%' : undefined
+        }}
       >
         <div className="chat-container" ref={chatContainerRef}>
           <div className="chat-header">
@@ -1172,6 +1643,17 @@ const PaperAnalyzer: React.FC = () => {
                           onClick={showSessionHistory}
                           title={t('paperAnalyzer.chatHistory')}
                         />
+                        {/* 文档栏位切换按钮 */}
+                        {(documentContent || currentPaperId) && (
+                          <Tooltip title={showDocumentPane ? t('paperAnalyzer.hideDocuments') : t('paperAnalyzer.showDocuments')}>
+                            <Button
+                              type="text"
+                              icon={<FileTextOutlined />}
+                              onClick={() => setShowDocumentPane(!showDocumentPane)}
+                              className={showDocumentPane ? 'active' : ''}
+                            />
+                          </Tooltip>
+                        )}
                         <Button
                           type="text"
                           icon={collapsed ? <RightOutlined /> : <LeftOutlined />}
@@ -1265,6 +1747,18 @@ const PaperAnalyzer: React.FC = () => {
                   <Spin size="small" /> {t('paperAnalyzer.loadingMoreMessages')}
                 </div>
               )}
+              
+              {/* 欢迎界面 - 当没有消息且没有文档时显示 */}
+              {responses.length === 0 && !loading && !showDocumentPane && (
+                <div className="chat-welcome">
+                  <div className="welcome-icon">
+                    <MessageOutlined style={{ fontSize: '48px', color: '#1890ff' }} />
+                  </div>
+                  <h3>{t('paperAnalyzer.chatWelcomeTitle')}</h3>
+                  <p>{t('paperAnalyzer.chatWelcomeDescription')}</p>
+                </div>
+              )}
+              
               <List
                 className="response-list"
                 itemLayout="vertical"
@@ -1281,9 +1775,12 @@ const PaperAnalyzer: React.FC = () => {
                   message={{
                     id: `streaming-${Date.now()}`,
                     role: 'assistant',
-                    content: streamingState.partialMessage || t('paperAnalyzer.thinking'),
-                    created_at: new Date().toISOString()
+                    content: streamingState.partialMessage || '正在思考...',
+                    created_at: new Date().toISOString(),
+                    sources: [],
+                    confidence: 0.0
                   }}
+                  isStreaming={true}
                 />
               )}
               {/* 移除重复的thinking状态，streamingState.isStreaming已经处理了思考状态 */}
@@ -1347,16 +1844,21 @@ const PaperAnalyzer: React.FC = () => {
                   )}
                 </div>
                 {!showSessions && (
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={handleAsk}
-                    loading={sending || analyzing}
-                    disabled={analyzing || showSessions}
-              >
-                    {analyzing ? t('paperAnalyzer.analyzing') : t('paperAnalyzer.send')}
-              </Button>
-                  )}
+                  <div className="right-actions">
+                    {/* 发送/停止按钮 - 根据状态切换 */}
+                    <Button
+                      type={streamingState.isStreaming ? "default" : "primary"}
+                      danger={streamingState.isStreaming}
+                      icon={streamingState.isStreaming ? <CloseCircleOutlined /> : <SendOutlined />}
+                      onClick={streamingState.isStreaming ? stopStreaming : handleAsk}
+                      loading={sending || analyzing}
+                      disabled={showSessions || (analyzing && !streamingState.isStreaming) || (!streamingState.isStreaming && !question.trim() && !selectedFile)}
+                    >
+                      {streamingState.isStreaming ? t('paperAnalyzer.stop') : 
+                       analyzing ? t('paperAnalyzer.analyzing') : t('paperAnalyzer.send')}
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1372,107 +1874,118 @@ const PaperAnalyzer: React.FC = () => {
     </Sider>
 
     <Content className="paper-analyzer-content">
-      <div className="document-viewer">
-        <div className="document-header">
-          <div className="header-left">
-            <FileTextOutlined /> {selectedFile?.name}
-          </div>
-          <div className="header-right">
-            <Select
-              style={{ width: 200 }}
-              placeholder={t('paperAnalyzer.selectTargetLanguage')}
-              value={selectedLanguage}
-              onChange={setSelectedLanguage}
-            >
-              {Object.entries(languages).map(([code, name]) => (
-                <Option key={code} value={code}>{name}</Option>
-              ))}
-            </Select>
-            <Button
-              type="primary"
-              icon={<TranslationOutlined />}
-              onClick={handleTranslate}
-              loading={translationLoading}
-              disabled={!selectedLanguage}
-            >
-              {t('paperAnalyzer.translate')}
-            </Button>
-          </div>
-        </div>
-        <div className="document-content-split">
-          <div className="original-content" ref={originalContentRef}>
-            <h3>{t('paperAnalyzer.originalText')}</h3>
-            {documentContent ? (
-              <div className="content-wrapper" 
-                style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
-                onScroll={handleOriginalScroll}
-              >
-                {documentContent.split('\n').map((line, index) => (
-                  <div key={index} className="line-container">
-                    <span className="line-number">{index + 1}</span>
-                    <span className="line-content">{line}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="empty-document">
-                <FileTextOutlined style={{ fontSize: '24px' }} />
-                <p>{t('paperAnalyzer.uploadDocumentPrompt')}</p>
-              </div>
-            )}
-          </div>
-          <div className="translated-content" ref={translatedContentRef}>
-            <div className="content-header">
-              <h3>{t('paperAnalyzer.translation')}</h3>
-              <div className="header-actions">
-                {translatedContent && (
-                  <>
-                    <Switch
-                      size="small"
-                      checked={syncScrolling}
-                      onChange={(checked) => setSyncScrolling(checked)}
-                      checkedChildren={t('paperAnalyzer.syncScrolling')}
-                      unCheckedChildren={t('paperAnalyzer.independentScrolling')}
-                    />
-                    <Dropdown
-                      menu={{
-                        items: downloadMenuItems,
-                        onClick: ({ key }) => handleDownload(key as string)
-                      }}
-                      trigger={['click']}
-                    >
-                      <Button 
-                        type="text" 
-                        icon={<DownloadOutlined />} 
-                        className="download-button"
-                        title={t('paperAnalyzer.downloadTranslation')}
-                      />
-                    </Dropdown>
-                  </>
-                )}
-              </div>
+      {showDocumentPane && (
+        <div className="document-viewer">
+          <div className="document-header">
+            <div className="header-left">
+              <FileTextOutlined /> {selectedFile?.name}
             </div>
-            {translatedContent ? (
-              <div className="content-wrapper" 
-                style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
-                onScroll={handleTranslatedScroll}
+            <div className="header-right">
+              <Select
+                style={{ width: 200 }}
+                placeholder={t('paperAnalyzer.selectTargetLanguage')}
+                value={selectedLanguage}
+                onChange={setSelectedLanguage}
               >
-                {translatedContent.split('\n').map((line, index) => (
-                  <div key={index} className="line-container">
-                    <span className="line-number">{index + 1}</span>
-                    <span className="line-content">{line}</span>
-                  </div>
+                {Object.entries(languages).map(([code, name]) => (
+                  <Option key={code} value={code}>{name}</Option>
                 ))}
+              </Select>
+              <Button
+                type="primary"
+                icon={<TranslationOutlined />}
+                onClick={handleTranslate}
+                loading={translationLoading}
+                disabled={!selectedLanguage}
+              >
+                {t('paperAnalyzer.translate')}
+              </Button>
+              {/* 关闭文档栏位按钮 */}
+              <Tooltip title={t('paperAnalyzer.closeDocumentPane')}>
+                <Button
+                  type="text"
+                  icon={<CloseCircleOutlined />}
+                  onClick={() => setShowDocumentPane(false)}
+                  className="close-document-pane"
+                />
+              </Tooltip>
+            </div>
+          </div>
+          <div className="document-content-split">
+            <div className="original-content" ref={originalContentRef}>
+              <h3>{t('paperAnalyzer.originalText')}</h3>
+              {documentContent ? (
+                <div className="content-wrapper" 
+                  style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
+                  onScroll={handleOriginalScroll}
+                >
+                  {documentContent.split('\n').map((line, index) => (
+                    <div key={index} className="line-container">
+                      <span className="line-number">{index + 1}</span>
+                      <span className="line-content">{line}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-document">
+                  <FileTextOutlined style={{ fontSize: '24px' }} />
+                  <p>{t('paperAnalyzer.uploadDocumentPrompt')}</p>
+                </div>
+              )}
+            </div>
+            <div className="translated-content" ref={translatedContentRef}>
+              <div className="content-header">
+                <h3>{t('paperAnalyzer.translation')}</h3>
+                <div className="header-actions">
+                  {translatedContent && (
+                    <>
+                      <Switch
+                        size="small"
+                        checked={syncScrolling}
+                        onChange={(checked) => setSyncScrolling(checked)}
+                        checkedChildren={t('paperAnalyzer.syncScrolling')}
+                        unCheckedChildren={t('paperAnalyzer.independentScrolling')}
+                      />
+                      <Dropdown
+                        menu={{
+                          items: downloadMenuItems,
+                          onClick: ({ key }) => handleDownload(key as string)
+                        }}
+                        trigger={['click']}
+                      >
+                        <Button 
+                          type="text" 
+                          icon={<DownloadOutlined />} 
+                          className="download-button"
+                          title={t('paperAnalyzer.downloadTranslation')}
+                        />
+                      </Dropdown>
+                    </>
+                  )}
+                </div>
               </div>
-            ) : (
-              <div className="empty-translation">
-                <TranslationOutlined style={{ fontSize: '24px' }} />
-                <p>{t('paperAnalyzer.selectLanguagePrompt')}</p>
-              </div>
-            )}
+              {translatedContent ? (
+                <div className="content-wrapper" 
+                  style={{height: 'calc(100% - 30px)', overflow: 'auto'}}
+                  onScroll={handleTranslatedScroll}
+                >
+                  {translatedContent.split('\n').map((line, index) => (
+                    <div key={index} className="line-container">
+                      <span className="line-number">{index + 1}</span>
+                      <span className="line-content">{line}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-translation">
+                  <TranslationOutlined style={{ fontSize: '24px' }} />
+                  <p>{t('paperAnalyzer.selectLanguagePrompt')}</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </Content>
 
     {/* Add documents list drawer right before the final Layout closing tag */}

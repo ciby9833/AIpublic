@@ -1193,15 +1193,11 @@ async def ask_paper_question(
     paper_id: str = Body(...),
     db: Session = Depends(get_db)
 ):
-    try:
-        analyzer = get_paper_analyzer(db)
-        result = await analyzer.ask_question(question, paper_id)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "QUESTION_ERROR", "message": str(e)}
-        )
+    """单次问答API - 已废弃"""
+    return {
+        "status": "error",
+        "message": "单次问答API已废弃，请使用会话模式 /api/chat-sessions/{session_id}/messages"
+    }
 
 @app.get("/api/paper/{paper_id}/content")
 async def get_paper_content(
@@ -1223,15 +1219,11 @@ async def get_question_history(
     paper_id: str,
     db: Session = Depends(get_db)
 ):
-    try:
-        analyzer = get_paper_analyzer(db)
-        history = await analyzer.get_question_history(paper_id)
-        return {"history": history}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "HISTORY_ERROR", "message": str(e)}
-        )
+    """问答历史API - 已废弃"""
+    return {
+        "status": "error",
+        "message": "问答历史API已废弃，请使用会话模式 /api/chat-sessions/{session_id}/messages"
+    }
 
 @app.post("/api/paper/{paper_id}/translate")
 async def translate_paper(
@@ -1895,23 +1887,58 @@ async def stream_message_to_session(
         # 获取分析器实例并调用流式消息方法
         analyzer = get_paper_analyzer(db)
         
-        async def response_stream():
-            async for chunk in analyzer.stream_message(
-                session_id=session_id,
-                message=request.get("message"),
-                user_id=user_id
-            ):
-                yield json.dumps(chunk) + "\n"
+        async def sse_response_stream():
+            """SSE格式的响应流，参考ChatGPT实现"""
+            chunk_id = 0
+            try:
+                async for chunk in analyzer.stream_message(
+                    session_id=session_id,
+                    message=request.get("message"),
+                    user_id=user_id
+                ):
+                    chunk_id += 1
+                    # SSE格式: data: {json}\n\n
+                    if chunk.get("error"):
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                        yield f"data: [DONE]\n\n"
+                        break
+                    elif chunk.get("saved") and chunk.get("message_id"):
+                        # 这是最终保存确认消息 - 关键修复点
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                        yield f"data: [DONE]\n\n"
+                        break
+                    elif chunk.get("done") and not chunk.get("saved"):
+                        # 内容流结束但还没有保存确认，继续等待
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                        # 注意：这里不发送[DONE]，继续等待保存确认
+                    else:
+                        # 普通内容块
+                        chunk["id"] = f"chunk_{chunk_id}"
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                        
+                        # 如果这是最后一个内容块但没有保存确认，继续等待
+                        if chunk.get("done") and not chunk.get("saved"):
+                            continue
+            except Exception as e:
+                error_chunk = {"error": str(e), "done": True, "id": f"error_{chunk_id}"}
+                yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+                yield f"data: [DONE]\n\n"
         
         return StreamingResponse(
-            content=response_stream(),
-            media_type="application/json"
+            content=sse_response_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control"
+            }
         )
         
     except Exception as e:
         print(f"Stream API error: {str(e)}")
         return StreamingResponse(
-            content=iter([json.dumps({"error": str(e), "done": True})]),
-            media_type="application/json"
+            content=iter([f"data: {json.dumps({'error': str(e), 'done': True})}\n\n", "data: [DONE]\n\n"]),
+            media_type="text/event-stream"
         )
 

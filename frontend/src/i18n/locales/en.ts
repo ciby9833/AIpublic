@@ -218,7 +218,9 @@ export default {
       deleteSessionFailed: "Delete failed: {{message}}",
       titleUpdated: "Session title updated",
       updateTitleFailed: "Failed to save title: {{message}}",
-      
+      chatWelcomeTitle: "Welcome to Cargo AI Assistant",
+      chatWelcomeDescription: "Please enter your question or share files to chat",  
+      uploadDocumentHint: "Please upload a document or wait for analysis to complete",
       // Input area
       inputPlaceholder: "Enter your question or drag files here",
       inputPlaceholderAnalyzing: "Analyzing document, please wait...",

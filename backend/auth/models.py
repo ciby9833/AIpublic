@@ -53,9 +53,15 @@ class ChatSession(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_active = Column(Boolean, default=True)
-    session_type = Column(String(20), default="general")  # "general" 或 "document"
+    session_type = Column(String(20), default="general")  # "general", "document", "web", "mixed"
     paper_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)  # 添加此行支持多文档
     is_ai_only = Column(Boolean, default=False)  # 添加此行支持纯AI对话
+    is_temporary = Column(Boolean, default=False)  # 添加临时会话标记
+    
+    # ✅ 新增网页会话支持字段
+    web_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)  # 支持多网页
+    mixed_content_count = Column(Integer, default=0)  # 混合内容数量统计
+    last_content_type = Column(String(20))  # 最后添加的内容类型
     
     # 关联关系
     user = relationship("User", back_populates="chat_sessions")
@@ -70,6 +76,7 @@ class ChatMessage(Base):
     role = Column(String(20), nullable=False)  # 'user' 或 'assistant'
     content = Column(Text, nullable=False)  # 保留兼容性
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())  # 添加更新时间字段
     sources = Column(JSONB)  # 存储参考来源信息
     confidence = Column(Float)  # 存储回答的可信度
     document_id = Column(UUID(as_uuid=True), nullable=True)  # 当消息引用特定文档时
@@ -88,10 +95,14 @@ class SessionDocument(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey('chat_sessions.id', ondelete='CASCADE'), nullable=False)
-    paper_id = Column(UUID(as_uuid=True), nullable=False)  # 引用paper_analysis.paper_id
+    paper_id = Column(UUID(as_uuid=True), nullable=False)  # 引用paper_analysis.paper_id（包括文档和网页）
     added_at = Column(DateTime(timezone=True), server_default=func.now())
     order = Column(Integer, default=0)
     filename = Column(String(255))
+    
+    # ✅ 新增字段：区分内容类型
+    content_type = Column(String(20), default="document")  # "document" 或 "web"
+    source_url = Column(String(2048))  # 如果是网页，存储原始URL
     
     # 关联关系
     session = relationship("ChatSession", back_populates="documents")

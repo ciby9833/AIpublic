@@ -115,7 +115,7 @@ export interface DocumentRequest {
 }
 
 // Rich content types for messages
-export type MessageContentType = 'text' | 'markdown' | 'code' | 'table' | 'image';
+export type MessageContentType = 'text' | 'markdown' | 'code' | 'table' | 'image' | 'list' | 'ordered-list' | 'unordered-list' | 'mermaid' | 'diagram' | 'latex' | 'math' | 'html' | 'json';
 
 export interface RichContentItem {
   type: MessageContentType;
@@ -124,7 +124,7 @@ export interface RichContentItem {
   alt?: string;       // For images
   url?: string;       // For images
   columns?: string[]; // For tables
-  rows?: any[][];     // For tables
+  rows?: string[][];  // For tables
   metadata?: Record<string, any>; // Additional metadata
 }
 

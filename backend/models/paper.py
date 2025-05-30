@@ -43,6 +43,14 @@ class PaperAnalysis(Base):
     # 添加结构化数据字段
     structured_data = Column(JSONB)  # 用于存储Excel等结构化文件的JSON数据 513待更新
 
+    # ✅ 新增网页支持字段
+    source_url = Column(String(2048))  # 网页源URL，支持长URL
+    web_metadata = Column(JSONB)  # 网页元数据（标题、描述、关键词等）
+    web_links = Column(JSONB)  # 网页中提取的链接信息
+    web_images = Column(JSONB)  # 网页中的图片信息
+    fetch_time = Column(DateTime(timezone=True))  # 网页抓取时间
+    content_hash = Column(String(64))  # 内容哈希，用于检测变更
+
 class PaperQuestion(Base):
     __tablename__ = "paper_questions"
 
@@ -52,3 +60,30 @@ class PaperQuestion(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     paper_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=False, server_default='{}')
+
+# ✅ 新增网页索引表（独立存储网页向量索引）
+class WebIndex(Base):
+    __tablename__ = "web_indexes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    web_id = Column(UUID(as_uuid=True), ForeignKey('paper_analysis.paper_id'), nullable=False)
+    chunk_index = Column(Integer, nullable=False)  # 分块索引
+    content = Column(Text, nullable=False)  # 分块内容
+    embedding = Column(JSONB)  # 向量嵌入
+    chunk_metadata = Column(JSONB)  # 分块元数据
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# ✅ 新增网页更新监控表
+class WebMonitor(Base):
+    __tablename__ = "web_monitors"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    web_id = Column(UUID(as_uuid=True), ForeignKey('paper_analysis.paper_id'), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    url = Column(String(2048), nullable=False)
+    last_check = Column(DateTime(timezone=True), server_default=func.now())
+    last_content_hash = Column(String(64))
+    check_interval_hours = Column(Integer, default=24)  # 检查间隔（小时）
+    is_active = Column(Boolean, default=True)
+    change_detected = Column(Boolean, default=False)
+    notification_sent = Column(Boolean, default=False)
